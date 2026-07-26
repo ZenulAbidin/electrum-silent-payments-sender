@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using this metadata."
+title: "Silent Payments Sender for Electrum"
+type: software
+authors:
+  - family-names: "Sherief"
+    given-names: "Ali"
+    alias: "Zenul_Abidin"
+version: 1.0.0
+date-released: 2026-07-26
+license: MIT
+repository-code: "https://github.com/ZenulAbidin/electrum-silent-payments-sender"
+url: "https://github.com/ZenulAbidin/electrum-silent-payments-sender"
+abstract: >-
+  An experimental BIP352 Silent Payments sender plugin for the Electrum Qt
+  desktop wallet.

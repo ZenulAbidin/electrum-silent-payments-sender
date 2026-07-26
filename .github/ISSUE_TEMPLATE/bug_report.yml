@@ -1,0 +1,94 @@
+name: Bug report
+description: Report a reproducible, non-security defect
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve the plugin. Do not include wallet seeds,
+        private keys, receiver secrets, wallet files, passwords, or other
+        sensitive data. Report suspected vulnerabilities through the private
+        security form instead.
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: electrum-version
+    attributes:
+      label: Electrum version
+      placeholder: "4.8.0"
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      placeholder: "Ubuntu 24.04, macOS 15, or Windows 11"
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network
+      options:
+        - Testnet
+        - Mainnet
+        - Signet
+        - Regtest
+        - Not transaction-related
+    validations:
+      required: true
+  - type: dropdown
+    id: wallet-type
+    attributes:
+      label: Wallet type
+      options:
+        - Standard deterministic software wallet
+        - Hardware wallet
+        - Watch-only wallet
+        - Imported-key wallet
+        - Multisig wallet
+        - 2FA wallet
+        - Not wallet-related
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the actual and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Use only synthetic or testnet data.
+      placeholder: |
+        1. Start Electrum...
+        2. Enable the plugin...
+        3. Paste...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Redact addresses and all sensitive or identifying data.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Safety confirmations
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I removed all wallet secrets and identifying financial data.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

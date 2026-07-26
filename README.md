@@ -1,5 +1,9 @@
 # Silent Payments Sender for Electrum
 
+[![Tests](https://github.com/ZenulAbidin/electrum-silent-payments-sender/actions/workflows/tests.yml/badge.svg)](https://github.com/ZenulAbidin/electrum-silent-payments-sender/actions/workflows/tests.yml)
+[![GitHub release](https://img.shields.io/github/v/release/ZenulAbidin/electrum-silent-payments-sender)](https://github.com/ZenulAbidin/electrum-silent-payments-sender/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A sender implementation of [BIP352 Silent Payments](https://bips.dev/352/)
 for Electrum's Qt desktop wallet.
 
@@ -39,8 +43,9 @@ input-dependent BIP352 derivation bound to the transaction that is signed.
 
 ## Install
 
-1. Download `silent_payments_sender-1.0.0.zip` and verify its SHA-256 against
-   `SHA256SUMS`.
+1. Download the `silent_payments_sender-*.zip` installable asset from the
+   [latest release](https://github.com/ZenulAbidin/electrum-silent-payments-sender/releases/latest)
+   and verify its SHA-256 against the release's `SHA256SUMS-*` asset.
 2. In Electrum, open **Tools → Plugins**.
 3. Click **Add plugin**, select the ZIP, review Electrum's external-plugin
    warning, and enable **Silent Payments Sender**.
@@ -206,6 +211,18 @@ compatible because it does not provide the separate `electrum_ecc` package.
 `BTT_POST.md` is a ready-to-edit Bitcointalk announcement template.
 `SILENTPAYMENTS_XYZ_SUBMISSION.md` contains the website-listing request to use
 once the source and release have public URLs.
+
+## Community and support
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
+- Use [GitHub Discussions](https://github.com/ZenulAbidin/electrum-silent-payments-sender/discussions)
+  for usage questions and [GitHub Issues](https://github.com/ZenulAbidin/electrum-silent-payments-sender/issues)
+  for reproducible non-security bugs.
+- Read [SECURITY.md](SECURITY.md) and use
+  [private vulnerability reporting](https://github.com/ZenulAbidin/electrum-silent-payments-sender/security/advisories/new)
+  for security-sensitive reports. Never post wallet seeds, private keys, or
+  other secrets.
+- Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Design notes
 

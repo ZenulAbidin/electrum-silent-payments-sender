@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose a scoped improvement or new capability
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read the documented scope and CONTRIBUTING.md first. Features that
+        expand wallet types, transaction forms, or key handling need an
+        explicit safety and protocol analysis.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What user need is not met today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest change that addresses the use case.
+    validations:
+      required: true
+  - type: textarea
+    id: protocol
+    attributes:
+      label: BIP352 and Electrum compatibility
+      description: Identify relevant protocol rules, Electrum APIs, and versions.
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy impact
+      description: Explain changes to key access, transaction integrity, or user risk.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I read the README, conformance matrix, and contribution guide.
+          required: true
+        - label: I searched existing issues and discussions.
+          required: true
