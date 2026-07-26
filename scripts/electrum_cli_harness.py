@@ -36,6 +36,7 @@ from electrum_ecc.util import bip340_tagged_hash  # noqa: E402
 
 from silent_payments_sender.core import (  # noqa: E402
     PLACEHOLDER_SCRIPT,
+    DerivationFailure,
     SilentPaymentAddress,
 )
 from silent_payments_sender.txflow import (  # noqa: E402
@@ -55,6 +56,7 @@ INPUT_TYPES = ("p2pkh", "p2wpkh-p2sh", "p2wpkh")
 FUNDING_VALUE = 10_000_057
 SEND_VALUE = 100_000
 FIXED_FEE = 1_000
+LOW_VALUE_INPUT = 800
 SCAN_SECRET = 11
 SPEND_SECRET = 29
 
@@ -108,7 +110,7 @@ def make_wallet(
     return wallet
 
 
-def make_synthetic_funding_tx(address):
+def make_synthetic_funding_tx(address, *, value=FUNDING_VALUE):
     """Create an offline-only transaction paying the test wallet."""
     scriptpubkey = bitcoin.address_to_script(address)
     raw = (
@@ -119,7 +121,7 @@ def make_synthetic_funding_tx(address):
         + b"\x00"
         + (0xFFFFFFFF).to_bytes(4, "little")
         + b"\x01"
-        + FUNDING_VALUE.to_bytes(8, "little")
+        + value.to_bytes(8, "little")
         + bitcoin.var_int(len(scriptpubkey))
         + scriptpubkey
         + (0).to_bytes(4, "little")
@@ -402,6 +404,93 @@ def run_case(
     }
 
 
+def verify_dust_remainder_rejected(config, *, send_value):
+    wallet = make_wallet(
+        config,
+        "p2wpkh",
+        use_change=True,
+        multiple_change=False,
+        spend_confirmed_only=False,
+        output_rounding=True,
+        merge_duplicate_outputs=False,
+    )
+    funding_address = wallet.get_receiving_addresses()[0]
+    funding_tx = make_synthetic_funding_tx(
+        funding_address,
+        value=LOW_VALUE_INPUT,
+    )
+    wallet.adb.receive_tx_callback(
+        funding_tx,
+        tx_height=1,
+    )
+    wallet.adb.add_verified_tx(
+        funding_tx.txid(),
+        util.TxMinedInfo(
+            _height=1,
+            conf=100,
+        ),
+    )
+    coins = wallet.get_spendable_coins(
+        None,
+        nonlocal_only=False,
+        confirmed_only=False,
+    )
+    assert len(coins) == 1
+    assert coins[0].value_sats() == LOW_VALUE_INPUT
+
+    captured = {}
+    wallet_make_unsigned_transaction = wallet.make_unsigned_transaction
+
+    def capture_make_unsigned_transaction(**kwargs):
+        tx = wallet_make_unsigned_transaction(**kwargs)
+        captured["tx"] = tx
+        return tx
+
+    wallet.make_unsigned_transaction = capture_make_unsigned_transaction
+    fee_policy = FeePolicy("feerate:1100")
+    try:
+        make_unsigned_silent_transaction(
+            wallet=wallet,
+            fee_policy=fee_policy,
+            coins=coins,
+            outputs=[
+                PartialTxOutput(
+                    scriptpubkey=PLACEHOLDER_SCRIPT,
+                    value=send_value,
+                )
+            ],
+            spend_confirmed_only=False,
+        )
+    except DerivationFailure as exc:
+        assert "assigned the remainder" in str(exc)
+    else:
+        raise AssertionError(
+            "a dust remainder was accepted without a change output"
+        )
+
+    tx = captured["tx"]
+    change_outputs = [
+        output for output in tx.outputs()
+        if output.scriptpubkey != PLACEHOLDER_SCRIPT
+    ]
+    estimated_fee = fee_policy.estimate_fee(
+        tx.estimated_size(),
+        network=wallet.network,
+    )
+    assert change_outputs == []
+    assert tx.get_fee() == LOW_VALUE_INPUT - send_value
+    assert tx.get_fee() > estimated_fee
+    return {
+        "status": "rejected-before-signing",
+        "input_sat": LOW_VALUE_INPUT,
+        "send_sat": send_value,
+        "change_outputs": 0,
+        "actual_fee_sat": tx.get_fee(),
+        "policy_fee_sat": estimated_fee,
+        "fee_policy": fee_policy.get_descriptor(),
+    }
+
+
 async def async_main(*, network_name):
     if ELECTRUM_VERSION not in TESTED_ELECTRUM_VERSIONS:
         raise SystemExit(
@@ -426,6 +515,13 @@ async def async_main(*, network_name):
                 "status": "ok",
                 "electrum_version": ELECTRUM_VERSION,
                 "network": network_name,
+                "dust_remainder_rejections": [
+                    verify_dust_remainder_rejected(
+                        config,
+                        send_value=send_value,
+                    )
+                    for send_value in (600, 100)
+                ],
                 "cases": [
                     run_case(
                         config,
