@@ -10,9 +10,7 @@ It integrates directly into Electrum's existing **Send** tab. Paste a Silent Pay
 
 ## Safety status
 
-This is an independent plugin, not an official Electrum feature, and has not
-received a professional security audit. Review the source, verify the release
-hash, test on testnet, and use a small amount for any first mainnet payment.
+This is an independent plugin, not an official Electrum feature, and has not received a professional security audit. Review the source, verify the release hash, test on testnet, and use a small amount for any first mainnet payment.
 
 ## Features
 
@@ -143,13 +141,6 @@ once the source and release have public URLs.
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
 - Use [GitHub Discussions](https://github.com/ZenulAbidin/electrum-silent-payments-sender/discussions) for usage questions and [GitHub Issues](https://github.com/ZenulAbidin/electrum-silent-payments-sender/issues) for reproducible non-security bugs.
 - Read [SECURITY.md](SECURITY.md) and use [private vulnerability reporting](https://github.com/ZenulAbidin/electrum-silent-payments-sender/security/advisories/new) for security-sensitive reports. Never post wallet seeds, private keys, or other secrets.
-- Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
-## Design notes
-
-Electrum's normal recipient parser does not currently understand BIP352 addresses. The plugin recognizes them at the Send-tab boundary and routes only those payments through its BIP352 transaction builder; ordinary Bitcoin and Lightning recipients continue through Electrum unchanged. It uses a 34-byte P2TR placeholder during fee/coin selection. After inputs are known, it replaces that placeholder with the BIP352-derived P2TR script of exactly the same serialized size.
-
-The plugin never sends private keys anywhere. It derives each selected input's private key inside Electrum, uses the sum only to derive the recipient output, and lets the wallet's normal signer sign the transaction.
 
 ## License and attribution
 
