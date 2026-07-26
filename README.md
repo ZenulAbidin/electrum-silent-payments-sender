@@ -4,6 +4,8 @@
 [![GitHub release](https://img.shields.io/github/v/release/ZenulAbidin/electrum-silent-payments-sender)](https://github.com/ZenulAbidin/electrum-silent-payments-sender/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+![Silent Payments Sender logo](https://talkimg.com/images/2026/07/26/Uh9ryv.png)
+
 A sender implementation of [BIP352 Silent Payments](https://bips.dev/352/) for Electrum's Qt desktop wallet.
 
 It integrates directly into Electrum's existing **Send** tab. Paste a Silent Payment address into **Pay to**, enter the amount, and press **Pay…** as usual. The plugin detects the address and builds a normal Bitcoin transaction whose recipient output is derived from the wallet's selected inputs. 
