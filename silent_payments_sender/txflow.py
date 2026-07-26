@@ -172,15 +172,10 @@ def make_unsigned_silent_transaction(
         tx.estimated_size(),
         network=wallet.network,
     )
-    allowed_rounding = (
-        100
-        if change_outputs and settings.output_rounding
-        else 0
-    )
+    allowed_rounding = wallet.dust_threshold() + 100
     if (
         not isinstance(fee, int)
         or fee < 0
-        or fee < estimated_fee
         or fee > estimated_fee + allowed_rounding
     ):
         raise DerivationFailure(

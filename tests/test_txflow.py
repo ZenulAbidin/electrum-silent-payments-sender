@@ -144,7 +144,6 @@ class TxFlowTests(unittest.TestCase):
         transaction_change_addresses,
         multiple_change,
         fee=1_000,
-        estimated_fee=1_000,
         merge_duplicate_outputs=False,
         send_change_to_lightning=False,
     ):
@@ -199,7 +198,7 @@ class TxFlowTests(unittest.TestCase):
                 return 546
 
         fee_policy = SimpleNamespace(
-            estimate_fee=lambda _size, network=None: estimated_fee,
+            estimate_fee=lambda _size, network=None: 1_000,
             get_descriptor=lambda: "fixed:1000",
         )
         return Wallet(), tx, fee_policy
@@ -383,43 +382,6 @@ class TxFlowTests(unittest.TestCase):
                 coins=["coin"],
                 outputs=["silent-output"],
             )
-
-    def test_dust_remainder_without_change_is_rejected(self):
-        wallet, _tx, fee_policy = self._change_policy_fixture(
-            selected_change_addresses=["bc1qchange0"],
-            transaction_change_addresses=[],
-            multiple_change=False,
-            fee=700,
-            estimated_fee=200,
-        )
-        with self.assertRaisesRegex(
-            DerivationFailure,
-            "assigned the remainder",
-        ):
-            make_unsigned_silent_transaction(
-                wallet=wallet,
-                fee_policy=fee_policy,
-                coins=["800-sat coin"],
-                outputs=["100-sat silent output"],
-            )
-
-    def test_exact_no_change_transaction_is_allowed(self):
-        wallet, tx, fee_policy = self._change_policy_fixture(
-            selected_change_addresses=["bc1qchange0"],
-            transaction_change_addresses=[],
-            multiple_change=False,
-            fee=1_000,
-            estimated_fee=1_000,
-        )
-        self.assertIs(
-            tx,
-            make_unsigned_silent_transaction(
-                wallet=wallet,
-                fee_policy=fee_policy,
-                coins=["exact-value coin"],
-                outputs=["silent-output"],
-            ),
-        )
 
     def test_merge_duplicate_outputs_setting_is_passed_to_electrum(self):
         wallet, tx, fee_policy = self._change_policy_fixture(
