@@ -1,0 +1,11 @@
+{
+  "name": "silent_payments_sender",
+  "fullname": "Silent Payments Sender",
+  "description": "BIP352 Silent Payments sender support for standard software wallets.",
+  "author": "Ali Sherief (Zenul_Abidin)",
+  "license": "MIT",
+  "icon": "silent-payments-logo.svg",
+  "available_for": ["qt"],
+  "version": "1.0.0",
+  "min_electrum_version": "4.6.0"
+}

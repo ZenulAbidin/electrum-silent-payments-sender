@@ -1,0 +1,8 @@
+{
+  "electrum_version": "4.8.0",
+  "fee_sat": 500,
+  "recovery_txid": "221b5ca73d7944ebfda1f375f3d936a2ba993d3a093dcb9e03a1b93f1368d0a5",
+  "signature_verified_by_electrum": true,
+  "source_txid": "10ad57dbeba6d27dbff152cbf91d08c5ad415cecfe572bb1306a17ac62c15644",
+  "status": "ok"
+}

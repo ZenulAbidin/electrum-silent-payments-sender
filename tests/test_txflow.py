@@ -1,0 +1,320 @@
+from pathlib import Path
+from copy import deepcopy
+from threading import RLock
+from types import SimpleNamespace
+import sys
+import unittest
+
+from tests import electrum_test_shim
+
+
+electrum_test_shim.install()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from silent_payments_sender.core import (  # noqa: E402
+    DerivationFailure,
+    PLACEHOLDER_SCRIPT,
+    SilentPaymentAddress,
+    UnsupportedWallet,
+)
+from silent_payments_sender.txflow import (  # noqa: E402
+    OUTPUT_CONTINUATION_PREFIX,
+    OUTPUT_DISPLAY_WIDTH,
+    annotate_silent_payment_output,
+    confirm_transaction_compat,
+    finalize_transaction,
+    full_silent_payment_output_label,
+    normalize_silent_payment_records,
+    seal_after_confirmation,
+    silent_payment_history_label,
+    silent_payment_output_label,
+    validate_wallet,
+    verify_transaction,
+)
+
+
+ADDRESS = (
+    "sp1qqgste7k9hx0qftg6qmwlkqtwuy6cycyavzmzj85c6qdfhjdpdjtdgqjue"
+    "xzk6murw56suy3e0rd2cgqvycxttddwsvgxe2usfpxumr70xc9pkqwv"
+)
+SECRETS = [
+    bytes.fromhex("eadc78165ff1f8ea94ad7cfdc54990738a4c53f6e0507b42154201b8e5dff3b1"),
+    bytes.fromhex("93f5ed907ad5b2bdbbdcb5d9116ebc0a4e1f92f910d5260237fa45a9408aad16"),
+]
+TXIDS = [
+    "f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16",
+    "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d",
+]
+
+
+class FakeOutpoint:
+    def __init__(self, txid, vout):
+        self.txid = bytes.fromhex(txid)
+        self.vout = vout
+
+    def serialize_to_network(self):
+        return self.txid[::-1] + self.vout.to_bytes(4, "little")
+
+
+class FakeOutput:
+    def __init__(self, scriptpubkey, value):
+        self.scriptpubkey = scriptpubkey
+        self.value = value
+        self.address = "bc1ptestderived"
+
+    def serialize_to_network(self):
+        return (
+            self.value.to_bytes(8, "little")
+            + bytes([len(self.scriptpubkey)])
+            + self.scriptpubkey
+        )
+
+
+class FakeTx:
+    def __init__(self):
+        self._inputs = [
+            SimpleNamespace(address="mine-0", prevout=FakeOutpoint(TXIDS[0], 0)),
+            SimpleNamespace(address="mine-1", prevout=FakeOutpoint(TXIDS[1], 0)),
+        ]
+        self._outputs = [FakeOutput(PLACEHOLDER_SCRIPT, 50_000)]
+        self.rbf = True
+
+    def inputs(self):
+        return self._inputs
+
+    def outputs(self):
+        return self._outputs
+
+    def set_rbf(self, value):
+        self.rbf = value
+
+    def invalidate_ser_cache(self):
+        pass
+
+    def serialize_to_network(self, *, include_sigs=False):
+        material = b"".join(
+            txin.prevout.serialize_to_network() for txin in self._inputs
+        )
+        material += bytes([self.rbf])
+        for output in self._outputs:
+            material += output.value.to_bytes(8, "little") + output.scriptpubkey
+        return material.hex()
+
+
+class FakeKeystore:
+    type = "bip32"
+
+    def get_private_key(self, index, password):
+        return SECRETS[index], True
+
+
+class FakeWallet:
+    wallet_type = "standard"
+
+    def __init__(self):
+        self.keystore = FakeKeystore()
+
+    def is_watching_only(self):
+        return False
+
+    def get_keystore(self):
+        return self.keystore
+
+    def get_txin_type(self, address=None):
+        return "p2wpkh"
+
+    def add_input_info(self, txin):
+        pass
+
+    def is_mine(self, address):
+        return address in ("mine-0", "mine-1")
+
+    def get_address_index(self, address):
+        return int(address[-1])
+
+
+class TxFlowTests(unittest.TestCase):
+
+    def test_electrum_46_confirmation_api(self):
+        class Window46:
+            def confirm_tx_dialog(
+                self, make_tx, output_value, allow_preview=True,
+                batching_candidates=None,
+            ):
+                self.call = (make_tx, output_value, batching_candidates)
+                return "tx46", False
+
+        window = Window46()
+        result = confirm_transaction_compat(
+            window=window, make_tx="factory", amount_sat=123
+        )
+        self.assertEqual(result, ("tx46", False, False))
+        self.assertEqual(window.call, ("factory", 123, []))
+
+    def test_electrum_47_confirmation_api(self):
+        class Window47:
+            def confirm_tx_dialog(
+                self, make_tx, output_value, *,
+                payee_outputs=None, context=None, batching_candidates=None,
+            ):
+                self.call = (
+                    make_tx, output_value, payee_outputs, batching_candidates
+                )
+                return "tx47", False, False
+
+        window = Window47()
+        result = confirm_transaction_compat(
+            window=window, make_tx="factory", amount_sat=456
+        )
+        self.assertEqual(result, ("tx47", False, False))
+        self.assertEqual(window.call, ("factory", 456, None, []))
+
+    def test_finalize_and_verify(self):
+        wallet = FakeWallet()
+        tx = FakeTx()
+        recipient = SilentPaymentAddress.parse(ADDRESS, expected_hrp="sp")
+        finalized = finalize_transaction(
+            wallet=wallet,
+            tx=tx,
+            password=None,
+            recipient=recipient,
+        )
+        self.assertFalse(tx.rbf)
+        self.assertEqual(
+            finalized.scriptpubkey.hex(),
+            "51203e9fce73d4e77a4809908e3c3a2e54ee147b9312dc5044a193d1fc85de46e3c1",
+        )
+        self.assertTrue(verify_transaction(tx, finalized))
+        annotate_silent_payment_output(tx, finalized, recipient)
+        self.assertEqual(
+            "sp1qqgst…xc9pkqwv (bc1ptestderived)",
+            tx.outputs()[0].get_ui_address_str(),
+        )
+        self.assertEqual(
+            ADDRESS,
+            tx.outputs()[0]._silent_payment_address,
+        )
+        self.assertTrue(
+            tx.outputs()[0]._silent_payment_derived_address.startswith("bc1p")
+        )
+        self.assertTrue(verify_transaction(tx, finalized))
+        tx.rbf = True
+        self.assertFalse(verify_transaction(tx, finalized))
+        finalized = seal_after_confirmation(tx, finalized)
+        self.assertFalse(tx.rbf)
+        self.assertTrue(verify_transaction(tx, finalized))
+        tx.outputs()[0].value += 1
+        self.assertFalse(verify_transaction(tx, finalized))
+
+    def test_send_preview_label_abbreviates_both_addresses(self):
+        recipient = "sp1" + ("q" * 114)
+        derived = "bc1p" + ("x" * 58)
+        label = silent_payment_output_label(
+            recipient_address=recipient,
+            derived_address=derived,
+        )
+        self.assertEqual(37, len(label))
+        self.assertEqual(
+            "sp1qqqqq…qqqqqqqq (bc1pxxxx…xxxxxxxx)",
+            label,
+        )
+
+    def test_final_details_keep_both_complete_addresses_wrapped(self):
+        recipient = "sp1" + ("q" * 114)
+        derived = "bc1p" + ("x" * 58)
+        label = full_silent_payment_output_label(
+            recipient_address=recipient,
+            derived_address=derived,
+        )
+        self.assertEqual(42, len(label))
+        lines = str(label).splitlines()
+        self.assertEqual(5, len(lines))
+        self.assertEqual(recipient[:42], lines[0])
+        self.assertEqual(
+            recipient,
+            lines[0]
+            + lines[1].removeprefix(OUTPUT_CONTINUATION_PREFIX)
+            + lines[2].removeprefix(OUTPUT_CONTINUATION_PREFIX),
+        )
+        self.assertEqual(
+            derived,
+            lines[3].removeprefix(OUTPUT_CONTINUATION_PREFIX)
+            + lines[4].removeprefix(OUTPUT_CONTINUATION_PREFIX).rstrip(),
+        )
+        self.assertEqual(
+            OUTPUT_DISPLAY_WIDTH + len(OUTPUT_CONTINUATION_PREFIX),
+            len(lines[-1]),
+        )
+
+    def test_history_label_keeps_description_concise(self):
+        recipient = "sp1" + ("q" * 114)
+        derived = "bc1p" + ("x" * 58)
+        label = silent_payment_history_label(
+            recipient_address=recipient,
+            derived_address=derived,
+            description="Coffee",
+        )
+        self.assertEqual("Coffee", label)
+        self.assertEqual(
+            "Silent Payment",
+            silent_payment_history_label(
+                recipient_address=recipient,
+                derived_address=derived,
+            ),
+        )
+
+    def test_wallet_db_records_are_detached_from_stored_dict_wrappers(self):
+        class StoredDict(dict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.db_lock = RLock()
+
+        records = StoredDict({
+            "txid-one": StoredDict({
+                "recipient_address": "sp1recipient",
+                "derived_address": "bc1pderived",
+            }),
+        })
+        normalized = normalize_silent_payment_records(records)
+
+        self.assertIs(type(normalized), dict)
+        self.assertIs(type(normalized["txid-one"]), dict)
+        self.assertEqual(
+            {
+                "txid-one": {
+                    "recipient_address": "sp1recipient",
+                    "derived_address": "bc1pderived",
+                },
+            },
+            deepcopy(normalized),
+        )
+
+    def test_seal_rejects_output_mutation(self):
+        wallet = FakeWallet()
+        tx = FakeTx()
+        recipient = SilentPaymentAddress.parse(ADDRESS, expected_hrp="sp")
+        finalized = finalize_transaction(
+            wallet=wallet,
+            tx=tx,
+            password=None,
+            recipient=recipient,
+        )
+        tx.outputs()[0].value += 1
+        with self.assertRaises(DerivationFailure):
+            seal_after_confirmation(tx, finalized)
+
+    def test_watch_only_rejected(self):
+        wallet = FakeWallet()
+        wallet.is_watching_only = lambda: True
+        with self.assertRaises(UnsupportedWallet):
+            validate_wallet(wallet)
+
+    def test_hardware_keystore_rejected(self):
+        wallet = FakeWallet()
+        wallet.keystore.type = "hardware"
+        with self.assertRaises(UnsupportedWallet):
+            validate_wallet(wallet)
+
+
+if __name__ == "__main__":
+    unittest.main()

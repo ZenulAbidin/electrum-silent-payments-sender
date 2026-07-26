@@ -1,0 +1,15 @@
+Silent Payments Sender for Electrum
+
+The BIP352 derivation code is adapted from Electrum pull request #9900,
+authored by MorenoProg and other Electrum contributors, under Electrum's MIT
+license:
+
+https://github.com/spesmilo/electrum/pull/9900
+
+The plugin icon is adapted from the SVG mark used by SilentPayments.xyz,
+distributed with the MIT-licensed Hextra theme:
+Copyright (c) 2023 Xin.
+
+The implementation follows BIP352:
+
+https://bips.dev/352/
