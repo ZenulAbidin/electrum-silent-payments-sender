@@ -29,14 +29,15 @@ Version 1.0.0 targets BIP352 1.1.1 and intentionally supports only:
 - raw addresses and BIP21 `sp` payment instructions
 - forward-compatible Silent Payment address versions 1 through 30
 
-It intentionally rejects:
+Not supported yet:
 
 - hardware, watch-only, imported-key, multisig, and 2FA wallets
 - Taproot inputs, transaction batching, payjoin, and swaps
 - unsigned preview/export and later signing
 - multiple recipients or multiple silent outputs
 
-The transaction is made non-RBF. The plugin derives the final output only after
+The transaction is made non-RBF, although with the mempoolfullrbf protocol flag,
+it can signal RBF support anyway. The plugin derives the final output only after
 Electrum selects the inputs, verifies the inputs and output again after the fee
 confirmation dialog, and then signs immediately. These restrictions keep the
 input-dependent BIP352 derivation bound to the transaction that is signed.
@@ -174,7 +175,7 @@ plugin's documented scope with a small pure-Python secp256k1 test shim. The
 release checker also compiles every Python file and verifies the ZIP layout and
 manifest. See `CONFORMANCE.md` for the requirement matrix and explicit limits.
 
-The CLI integration harness is separate from the self-contained unit tests. It
+The CLI integration test suite is separate from the self-contained unit tests. It
 has been run under the official Electrum 4.6.0, 4.7.2, and 4.8.0 AppImage Python
 environments on both Bitcoin mainnet and testnet rules. It creates a real
 `Standard_Wallet`, injects a synthetic offline funding transaction, uses
@@ -205,7 +206,7 @@ The published source archive includes mainnet and testnet results for Electrum
 
 Electrum 4.6.0 is the minimum supported version. Its desktop binaries were the
 first to officially support installing third-party ZIP plugins, and its complete
-testnet transaction lifecycle passes this harness. Electrum 4.5.8 is not
+testnet transaction lifecycle passes this test suite. Electrum 4.5.8 is not
 compatible because it does not provide the separate `electrum_ecc` package.
 
 `BTT_POST.md` is a ready-to-edit Bitcointalk announcement template.
