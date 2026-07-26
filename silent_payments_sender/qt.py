@@ -19,6 +19,7 @@ from .txflow import (
     annotate_silent_payment_output_addresses,
     confirm_transaction_compat,
     finalize_transaction,
+    get_silent_payment_coins,
     make_unsigned_silent_transaction,
     normalize_silent_payment_records,
     seal_after_confirmation,
@@ -243,9 +244,13 @@ class Plugin(BasePlugin):
                 raise SilentPaymentError(
                     "Transaction batching is disabled for silent payments."
                 )
-            coins = window.get_coins(
-                nonlocal_only=False,
-                confirmed_only=confirmed_only,
+            spend_confirmed_only = bool(
+                confirmed_only
+                or window.config.WALLET_SPEND_CONFIRMED_ONLY
+            )
+            coins = get_silent_payment_coins(
+                window=window,
+                confirmed_only=spend_confirmed_only,
             )
             tx = make_unsigned_silent_transaction(
                 wallet=window.wallet,
@@ -257,6 +262,7 @@ class Plugin(BasePlugin):
                         value=amount_sat,
                     )
                 ],
+                spend_confirmed_only=spend_confirmed_only,
             )
             finalized = finalize_transaction(
                 wallet=window.wallet,

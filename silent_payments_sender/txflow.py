@@ -1,6 +1,6 @@
 """Electrum transaction integration kept separate from the Qt UI."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from inspect import signature
 from types import MethodType
@@ -26,9 +26,57 @@ class FinalizedSilentOutput:
     unsigned_tx_digest: bytes
 
 
+@dataclass(frozen=True)
+class SilentTransactionSettings:
+    change_addresses: tuple[str, ...]
+    use_change: bool
+    multiple_change: bool
+    spend_confirmed_only: bool
+    merge_duplicate_outputs: bool
+    output_rounding: bool
+    coin_chooser_policy: str
+    fee_policy: str
+    send_change_to_lightning: bool
+    submarine_payments_enabled: bool
+    locktime: int | None = None
+    final_fee_sat: int | None = None
+    rbf: bool = False
+
+
 OUTPUT_DISPLAY_WIDTH = 42
 OUTPUT_CONTINUATION_PREFIX = (" " * 15) + "\t"
 SILENT_ADDRESS_DISPLAY_EDGE_CHARS = 8
+
+
+def get_silent_payment_coins(
+    *,
+    window,
+    confirmed_only: bool = False,
+):
+    """Apply Electrum's confirmed-input setting, including coin control."""
+    spend_confirmed_only = bool(
+        confirmed_only or window.config.WALLET_SPEND_CONFIRMED_ONLY
+    )
+    coins = list(window.get_coins(
+        nonlocal_only=False,
+        confirmed_only=spend_confirmed_only,
+    ))
+    if not spend_confirmed_only:
+        return coins
+
+    confirmed_coins = window.wallet.get_spendable_coins(
+        None,
+        nonlocal_only=False,
+        confirmed_only=True,
+    )
+    confirmed_outpoints = {
+        coin.prevout.serialize_to_network()
+        for coin in confirmed_coins
+    }
+    return [
+        coin for coin in coins
+        if coin.prevout.serialize_to_network() in confirmed_outpoints
+    ]
 
 
 def make_unsigned_silent_transaction(
@@ -37,9 +85,35 @@ def make_unsigned_silent_transaction(
     fee_policy,
     coins,
     outputs,
+    spend_confirmed_only=None,
 ):
     """Build with Electrum's wallet change policy and reject fee leakage."""
+    config = wallet.config
+    send_change_to_lightning = bool(config.WALLET_SEND_CHANGE_TO_LIGHTNING)
+    if send_change_to_lightning:
+        raise UnsupportedWallet(
+            "Sending change to Lightning is not supported for Silent Payments. "
+            "Disable that setting in the transaction window."
+        )
     change_addresses = wallet.get_change_addresses_for_new_transaction()
+    settings = SilentTransactionSettings(
+        change_addresses=tuple(change_addresses),
+        use_change=bool(wallet.use_change),
+        multiple_change=bool(wallet.multiple_change),
+        spend_confirmed_only=bool(
+            config.WALLET_SPEND_CONFIRMED_ONLY
+            if spend_confirmed_only is None
+            else spend_confirmed_only
+        ),
+        merge_duplicate_outputs=bool(config.WALLET_MERGE_DUPLICATE_OUTPUTS),
+        output_rounding=bool(config.WALLET_COIN_CHOOSER_OUTPUT_ROUNDING),
+        coin_chooser_policy=str(config.WALLET_COIN_CHOOSER_POLICY),
+        fee_policy=fee_policy.get_descriptor(),
+        send_change_to_lightning=send_change_to_lightning,
+        submarine_payments_enabled=bool(
+            getattr(config, "WALLET_ENABLE_SUBMARINE_PAYMENTS", False)
+        ),
+    )
     tx = wallet.make_unsigned_transaction(
         fee_policy=fee_policy,
         coins=coins,
@@ -49,8 +123,14 @@ def make_unsigned_silent_transaction(
         is_sweep=False,
         rbf=False,
         send_change_to_lightning=False,
-        merge_duplicate_outputs=False,
+        merge_duplicate_outputs=settings.merge_duplicate_outputs,
     )
+    settings = replace(
+        settings,
+        locktime=tx.locktime,
+        final_fee_sat=tx.get_fee(),
+    )
+    tx._silent_payment_settings = settings
 
     silent_outputs = [
         output for output in tx.outputs()
@@ -386,6 +466,14 @@ def seal_after_confirmation(tx, finalized: FinalizedSilentOutput) -> FinalizedSi
             "The transaction inputs or outputs changed after BIP352 derivation."
         )
     tx.set_rbf(False)
+    settings = getattr(tx, "_silent_payment_settings", None)
+    if isinstance(settings, SilentTransactionSettings):
+        tx._silent_payment_settings = replace(
+            settings,
+            locktime=tx.locktime,
+            final_fee_sat=tx.get_fee(),
+            rbf=False,
+        )
     return FinalizedSilentOutput(
         output_index=finalized.output_index,
         scriptpubkey=finalized.scriptpubkey,

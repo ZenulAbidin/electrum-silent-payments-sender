@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +22,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import electrum_ecc as ecc  # noqa: E402
 from electrum import bitcoin, constants, keystore, segwit_addr, util  # noqa: E402
 from electrum.address_synchronizer import TX_HEIGHT_UNCONFIRMED  # noqa: E402
-from electrum.fee_policy import FixedFeePolicy  # noqa: E402
+from electrum.fee_policy import FeePolicy  # noqa: E402
 from electrum.simple_config import SimpleConfig  # noqa: E402
 from electrum.transaction import (  # noqa: E402
     PartialTxOutput,
@@ -39,6 +40,7 @@ from silent_payments_sender.core import (  # noqa: E402
 )
 from silent_payments_sender.txflow import (  # noqa: E402
     finalize_transaction,
+    get_silent_payment_coins,
     make_unsigned_silent_transaction,
     seal_after_confirmation,
     verify_transaction,
@@ -50,14 +52,28 @@ TEST_SEED = "bitter grass shiver impose acquire brush forget axis eager alone wi
 LEGACY_TEST_SEED = "cycle rocket west magnet parrot shuffle foot correct salt library feed song"
 NESTED_SEGWIT_ROOT_SEED = bytes.fromhex("42" * 32)
 INPUT_TYPES = ("p2pkh", "p2wpkh-p2sh", "p2wpkh")
-FUNDING_VALUE = 10_000_000
+FUNDING_VALUE = 10_000_057
 SEND_VALUE = 100_000
 FIXED_FEE = 1_000
 SCAN_SECRET = 11
 SPEND_SECRET = 29
 
 
-def make_wallet(config, input_type, *, use_change, multiple_change):
+def make_wallet(
+    config,
+    input_type,
+    *,
+    use_change,
+    multiple_change,
+    spend_confirmed_only,
+    output_rounding,
+    merge_duplicate_outputs,
+):
+    config.WALLET_SPEND_CONFIRMED_ONLY = spend_confirmed_only
+    config.WALLET_COIN_CHOOSER_OUTPUT_ROUNDING = output_rounding
+    config.WALLET_MERGE_DUPLICATE_OUTPUTS = merge_duplicate_outputs
+    config.WALLET_SEND_CHANGE_TO_LIGHTNING = False
+    config.WALLET_ENABLE_SUBMARINE_PAYMENTS = False
     if input_type == "p2pkh":
         wallet_keystore = keystore.from_seed(
             LEGACY_TEST_SEED,
@@ -83,6 +99,7 @@ def make_wallet(config, input_type, *, use_change, multiple_change):
     db.put("keystore", wallet_keystore.dump())
     db.put("gap_limit", 2)
     db.put("gap_limit_for_change", 3)
+    db.put("stored_height", 100)
     db.put("use_change", use_change)
     db.put("multiple_change", multiple_change)
     wallet = Standard_Wallet(db, config=config)
@@ -183,25 +200,77 @@ def verify_input_signatures(tx):
     return True
 
 
-def run_case(config, input_type, *, use_change, multiple_change):
+def run_case(
+    config,
+    input_type,
+    *,
+    use_change,
+    multiple_change,
+    spend_confirmed_only,
+    output_rounding,
+    merge_duplicate_outputs,
+    fee_policy_descriptor,
+):
     wallet = make_wallet(
         config,
         input_type,
         use_change=use_change,
         multiple_change=multiple_change,
+        spend_confirmed_only=spend_confirmed_only,
+        output_rounding=output_rounding,
+        merge_duplicate_outputs=merge_duplicate_outputs,
     )
     funding_address = wallet.get_receiving_addresses()[0]
     funding_tx = make_synthetic_funding_tx(funding_address)
     wallet.adb.receive_tx_callback(
         funding_tx,
-        tx_height=TX_HEIGHT_UNCONFIRMED,
+        tx_height=1 if spend_confirmed_only else TX_HEIGHT_UNCONFIRMED,
     )
-    coins = wallet.get_spendable_coins(
-        nonlocal_only=False,
+    if spend_confirmed_only:
+        wallet.adb.add_verified_tx(
+            funding_tx.txid(),
+            util.TxMinedInfo(
+                _height=1,
+                conf=100,
+            ),
+        )
+    window = SimpleNamespace(
+        config=config,
+        wallet=wallet,
+        get_coins=lambda **kwargs: wallet.get_spendable_coins(
+            None,
+            **kwargs,
+        ),
+    )
+    coins = get_silent_payment_coins(
+        window=window,
         confirmed_only=False,
     )
-    assert len(coins) == 1
+    assert len(coins) == 1, {
+        "input_type": input_type,
+        "use_change": use_change,
+        "multiple_change": multiple_change,
+        "spend_confirmed_only": spend_confirmed_only,
+        "output_rounding": output_rounding,
+        "merge_duplicate_outputs": merge_duplicate_outputs,
+        "selected_coins": len(coins),
+        "all_spendable": len(wallet.get_spendable_coins(
+            None,
+            nonlocal_only=False,
+            confirmed_only=False,
+        )),
+        "confirmed_spendable": len(wallet.get_spendable_coins(
+            None,
+            nonlocal_only=False,
+            confirmed_only=True,
+        )),
+        "local_height": wallet.adb.get_local_height(),
+    }
     assert coins[0].value_sats() == FUNDING_VALUE
+    if spend_confirmed_only:
+        assert 0 < coins[0].block_height <= wallet.adb.get_local_height()
+    else:
+        assert coins[0].block_height <= 0
 
     network_name = "testnet" if constants.net.TESTNET else "mainnet"
     hrp = "tsp" if constants.net.TESTNET else "sp"
@@ -210,9 +279,10 @@ def run_case(config, input_type, *, use_change, multiple_change):
         silent_address,
         expected_hrp=hrp,
     )
+    fee_policy = FeePolicy(fee_policy_descriptor)
     tx = make_unsigned_silent_transaction(
         wallet=wallet,
-        fee_policy=FixedFeePolicy(FIXED_FEE),
+        fee_policy=fee_policy,
         coins=coins,
         outputs=[
             PartialTxOutput(
@@ -220,6 +290,7 @@ def run_case(config, input_type, *, use_change, multiple_change):
                 value=SEND_VALUE,
             )
         ],
+        spend_confirmed_only=spend_confirmed_only,
     )
     finalized = finalize_transaction(
         wallet=wallet,
@@ -244,6 +315,17 @@ def run_case(config, input_type, *, use_change, multiple_change):
     unsigned_digest = sha256(
         bytes.fromhex(tx.serialize_to_network(include_sigs=False))
     ).hexdigest()
+    estimated_fee = fee_policy.estimate_fee(
+        tx.estimated_size(),
+        network=wallet.network,
+    )
+    rounding_fee = (
+        (FUNDING_VALUE - SEND_VALUE - estimated_fee) % 100
+        if output_rounding
+        else 0
+    )
+    expected_fee = estimated_fee + rounding_fee
+    assert tx.get_fee() == expected_fee
     wallet.sign_transaction(tx, password=None, ignore_warnings=True)
     assert tx.is_complete()
     assert verify_transaction(tx, finalized)
@@ -257,7 +339,6 @@ def run_case(config, input_type, *, use_change, multiple_change):
         finalized.scriptpubkey
     )
     assert parsed.outputs()[finalized.output_index].value == SEND_VALUE
-    assert tx.get_fee() == FIXED_FEE
     assert sum(txin.value_sats() for txin in tx.inputs()) == (
         sum(output.value for output in tx.outputs()) + tx.get_fee()
     )
@@ -266,7 +347,7 @@ def run_case(config, input_type, *, use_change, multiple_change):
         if index != finalized.output_index
     ]
     assert sum(output.value for output in change_outputs) == (
-        FUNDING_VALUE - SEND_VALUE - FIXED_FEE
+        FUNDING_VALUE - SEND_VALUE - expected_fee
     )
     if use_change:
         assert all(wallet.is_change(output.address) for output in change_outputs)
@@ -276,6 +357,19 @@ def run_case(config, input_type, *, use_change, multiple_change):
         assert len(change_outputs) == 1
         assert change_outputs[0].address == funding_address
         assert not wallet.is_change(change_outputs[0].address)
+    settings = tx._silent_payment_settings
+    assert settings.use_change is use_change
+    assert settings.multiple_change is multiple_change
+    assert settings.spend_confirmed_only is spend_confirmed_only
+    assert settings.output_rounding is output_rounding
+    assert settings.merge_duplicate_outputs is merge_duplicate_outputs
+    assert settings.coin_chooser_policy == "Privacy"
+    assert settings.fee_policy == fee_policy_descriptor
+    assert settings.send_change_to_lightning is False
+    assert settings.submarine_payments_enabled is False
+    assert settings.locktime == 123
+    assert settings.final_fee_sat == expected_fee
+    assert settings.rbf is False
     assert all(txin.nsequence == 0xFFFFFFFE for txin in parsed.inputs())
 
     return {
@@ -291,6 +385,10 @@ def run_case(config, input_type, *, use_change, multiple_change):
         "change_sat": sum(output.value for output in change_outputs),
         "use_change": use_change,
         "multiple_change": multiple_change,
+        "spend_confirmed_only": spend_confirmed_only,
+        "output_rounding": output_rounding,
+        "merge_duplicate_outputs": merge_duplicate_outputs,
+        "fee_policy": fee_policy_descriptor,
         "rbf": False,
         "silent_address": silent_address,
         "recipient_scriptpubkey": finalized.scriptpubkey.hex(),
@@ -334,10 +432,21 @@ async def async_main(*, network_name):
                         input_type,
                         use_change=use_change,
                         multiple_change=multiple_change,
+                        spend_confirmed_only=spend_confirmed_only,
+                        output_rounding=output_rounding,
+                        merge_duplicate_outputs=merge_duplicate_outputs,
+                        fee_policy_descriptor=fee_policy_descriptor,
                     )
                     for input_type in INPUT_TYPES
                     for use_change in (False, True)
                     for multiple_change in (False, True)
+                    for spend_confirmed_only in (False, True)
+                    for output_rounding in (False, True)
+                    for merge_duplicate_outputs in (False, True)
+                    for fee_policy_descriptor in (
+                        f"fixed:{FIXED_FEE}",
+                        "feerate:2000",
+                    )
                 ],
             }
             return result

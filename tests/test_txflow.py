@@ -24,6 +24,7 @@ from silent_payments_sender.txflow import (  # noqa: E402
     confirm_transaction_compat,
     finalize_transaction,
     full_silent_payment_output_label,
+    get_silent_payment_coins,
     make_unsigned_silent_transaction,
     normalize_silent_payment_records,
     seal_after_confirmation,
@@ -143,6 +144,8 @@ class TxFlowTests(unittest.TestCase):
         transaction_change_addresses,
         multiple_change,
         fee=1_000,
+        merge_duplicate_outputs=False,
+        send_change_to_lightning=False,
     ):
         outputs = [
             SimpleNamespace(
@@ -164,6 +167,7 @@ class TxFlowTests(unittest.TestCase):
             inputs=lambda: [SimpleNamespace(address="bc1qinput")],
             get_fee=lambda: fee,
             estimated_size=lambda: 200,
+            locktime=0,
         )
 
         class Wallet:
@@ -171,8 +175,17 @@ class TxFlowTests(unittest.TestCase):
             network = None
 
             def __init__(self):
+                self.use_change = bool(selected_change_addresses)
                 self.multiple_change = multiple_change
                 self.make_kwargs = None
+                self.config = SimpleNamespace(
+                    WALLET_SPEND_CONFIRMED_ONLY=False,
+                    WALLET_MERGE_DUPLICATE_OUTPUTS=merge_duplicate_outputs,
+                    WALLET_COIN_CHOOSER_OUTPUT_ROUNDING=True,
+                    WALLET_COIN_CHOOSER_POLICY="Privacy",
+                    WALLET_SEND_CHANGE_TO_LIGHTNING=send_change_to_lightning,
+                    WALLET_ENABLE_SUBMARINE_PAYMENTS=False,
+                )
 
             def get_change_addresses_for_new_transaction(self):
                 return list(selected_change_addresses)
@@ -186,8 +199,90 @@ class TxFlowTests(unittest.TestCase):
 
         fee_policy = SimpleNamespace(
             estimate_fee=lambda _size, network=None: 1_000,
+            get_descriptor=lambda: "fixed:1000",
         )
         return Wallet(), tx, fee_policy
+
+    def test_confirmed_input_setting_filters_manual_coin_selection(self):
+        confirmed = SimpleNamespace(
+            prevout=SimpleNamespace(
+                serialize_to_network=lambda: b"confirmed",
+            ),
+        )
+        unconfirmed = SimpleNamespace(
+            prevout=SimpleNamespace(
+                serialize_to_network=lambda: b"unconfirmed",
+            ),
+        )
+
+        class Wallet:
+            def get_spendable_coins(
+                self,
+                _domain,
+                *,
+                nonlocal_only,
+                confirmed_only,
+            ):
+                self.call = (nonlocal_only, confirmed_only)
+                return [confirmed]
+
+        wallet = Wallet()
+        get_coins_calls = []
+        window = SimpleNamespace(
+            config=SimpleNamespace(WALLET_SPEND_CONFIRMED_ONLY=True),
+            wallet=wallet,
+            get_coins=lambda **kwargs: (
+                get_coins_calls.append(kwargs) or [confirmed, unconfirmed]
+            ),
+        )
+        self.assertEqual(
+            [confirmed],
+            get_silent_payment_coins(window=window),
+        )
+        self.assertEqual(
+            [{"nonlocal_only": False, "confirmed_only": True}],
+            get_coins_calls,
+        )
+        self.assertEqual((False, True), wallet.call)
+
+    def test_unconfirmed_input_setting_allows_unconfirmed_coins(self):
+        coins = [
+            SimpleNamespace(
+                prevout=SimpleNamespace(
+                    serialize_to_network=lambda: b"unconfirmed",
+                ),
+            ),
+        ]
+        window = SimpleNamespace(
+            config=SimpleNamespace(WALLET_SPEND_CONFIRMED_ONLY=False),
+            wallet=SimpleNamespace(),
+            get_coins=lambda **_kwargs: coins,
+        )
+        self.assertEqual(
+            coins,
+            get_silent_payment_coins(window=window),
+        )
+
+    def test_confirmation_dialog_can_request_confirmed_coins_conservatively(self):
+        confirmed = SimpleNamespace(
+            prevout=SimpleNamespace(
+                serialize_to_network=lambda: b"confirmed",
+            ),
+        )
+        window = SimpleNamespace(
+            config=SimpleNamespace(WALLET_SPEND_CONFIRMED_ONLY=False),
+            wallet=SimpleNamespace(
+                get_spendable_coins=lambda *_args, **_kwargs: [confirmed],
+            ),
+            get_coins=lambda **_kwargs: [confirmed],
+        )
+        self.assertEqual(
+            [confirmed],
+            get_silent_payment_coins(
+                window=window,
+                confirmed_only=True,
+            ),
+        )
 
     def test_change_addresses_are_passed_to_electrum(self):
         addresses = ["bc1qchange0", "bc1qchange1", "bc1qchange2"]
@@ -205,6 +300,38 @@ class TxFlowTests(unittest.TestCase):
         self.assertIs(result, tx)
         self.assertEqual(addresses, wallet.make_kwargs["change_addr"])
         self.assertFalse(wallet.make_kwargs["rbf"])
+        self.assertFalse(wallet.make_kwargs["merge_duplicate_outputs"])
+        self.assertEqual(
+            addresses,
+            list(tx._silent_payment_settings.change_addresses),
+        )
+        self.assertEqual(
+            "fixed:1000",
+            tx._silent_payment_settings.fee_policy,
+        )
+        self.assertFalse(
+            tx._silent_payment_settings.send_change_to_lightning
+        )
+        self.assertFalse(
+            tx._silent_payment_settings.submarine_payments_enabled
+        )
+
+    def test_effective_confirmed_only_decision_is_recorded(self):
+        wallet, tx, fee_policy = self._change_policy_fixture(
+            selected_change_addresses=["bc1qchange0"],
+            transaction_change_addresses=["bc1qchange0"],
+            multiple_change=False,
+        )
+        make_unsigned_silent_transaction(
+            wallet=wallet,
+            fee_policy=fee_policy,
+            coins=["coin"],
+            outputs=["silent-output"],
+            spend_confirmed_only=True,
+        )
+        self.assertTrue(
+            tx._silent_payment_settings.spend_confirmed_only
+        )
 
     def test_change_returns_to_input_when_change_addresses_are_disabled(self):
         wallet, tx, fee_policy = self._change_policy_fixture(
@@ -248,6 +375,42 @@ class TxFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(
             DerivationFailure,
             "assigned the remainder",
+        ):
+            make_unsigned_silent_transaction(
+                wallet=wallet,
+                fee_policy=fee_policy,
+                coins=["coin"],
+                outputs=["silent-output"],
+            )
+
+    def test_merge_duplicate_outputs_setting_is_passed_to_electrum(self):
+        wallet, tx, fee_policy = self._change_policy_fixture(
+            selected_change_addresses=["bc1qchange0"],
+            transaction_change_addresses=["bc1qchange0"],
+            multiple_change=False,
+            merge_duplicate_outputs=True,
+        )
+        make_unsigned_silent_transaction(
+            wallet=wallet,
+            fee_policy=fee_policy,
+            coins=["coin"],
+            outputs=["silent-output"],
+        )
+        self.assertTrue(wallet.make_kwargs["merge_duplicate_outputs"])
+        self.assertTrue(
+            tx._silent_payment_settings.merge_duplicate_outputs
+        )
+
+    def test_send_change_to_lightning_is_explicitly_rejected(self):
+        wallet, _tx, fee_policy = self._change_policy_fixture(
+            selected_change_addresses=["bc1qchange0"],
+            transaction_change_addresses=["bc1qchange0"],
+            multiple_change=False,
+            send_change_to_lightning=True,
+        )
+        with self.assertRaisesRegex(
+            UnsupportedWallet,
+            "Sending change to Lightning",
         ):
             make_unsigned_silent_transaction(
                 wallet=wallet,
