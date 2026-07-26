@@ -77,14 +77,6 @@ def main() -> None:
     (DIST / "SHA256SUMS").write_text(
         "\n".join(checksums) + "\n", encoding="ascii"
     )
-    btt_template = (ROOT / "BTT_POST.md").read_text(encoding="utf-8")
-    (DIST / "BTT_POST_READY.md").write_text(
-        btt_template.replace(
-            "    [PASTE SHA256SUMS HERE]",
-            "\n".join(f"    {checksum}" for checksum in checksums),
-        ),
-        encoding="utf-8",
-    )
     for path, checksum in zip(artifacts, checksums):
         print(path)
         print(checksum.split()[0])
