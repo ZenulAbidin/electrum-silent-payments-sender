@@ -35,19 +35,26 @@ The unit tests are self-contained and use only Python's standard library:
 python3 -m unittest discover -s tests -v
 ```
 
-Build and validate the deterministic Electrum plugin archive:
+Build and validate the deterministic Electrum plugin archive in a normal Python
+environment:
 
 ```bash
 python3 scripts/build_release.py
 python3 scripts/check_release.py dist/silent_payments_sender-1.0.0.zip
-python3 scripts/electrum_sendtab_smoke.py \
+```
+
+The packaged Send-tab smoke test, Electrum integration harness, and recovery
+harness require an extracted official Electrum AppImage runtime. For example:
+
+```bash
+APPROOT=/path/to/squashfs-root
+LD_LIBRARY_PATH="$APPROOT/usr/lib:$APPROOT/usr/lib/x86_64-linux-gnu" \
+  "$APPROOT/usr/bin/python3" -s scripts/electrum_sendtab_smoke.py \
   --plugin dist/silent_payments_sender-1.0.0.zip
 ```
 
-The Electrum integration and recovery harnesses require an extracted official
-Electrum AppImage runtime. Their offline usage is documented in
-[README.md](README.md). Never run the harnesses with a real wallet, seed, or
-funded transaction.
+The remaining offline harness usage is documented in [README.md](README.md).
+Never run any harness with a real wallet, seed, or funded transaction.
 
 ## Pull requests
 

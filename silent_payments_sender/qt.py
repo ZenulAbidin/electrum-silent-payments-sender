@@ -147,6 +147,13 @@ class Plugin(BasePlugin):
             if was_active:
                 send_tab.send_button.setToolTip("")
                 send_tab.payto_e.setToolTip("")
+                # Match the native unfrozen field without calling update_fields()
+                # while payment_identifier can still be None. Explicitly restore
+                # the palette base color: clearing a Qt stylesheet can leave the
+                # previous validation color painted until another style change.
+                send_tab.payto_e.setStyleSheet(
+                    "QWidget { background-color: palette(base); }"
+                )
                 # Do not call update_fields() here. Electrum's do_clear()
                 # clears the text before setting payment_identifier to None,
                 # so this queued refresh can run in that intermediate state.

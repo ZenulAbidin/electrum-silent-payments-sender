@@ -10,7 +10,14 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "silent_payments_sender"
 DIST = ROOT / "dist"
-SOURCE_EXCLUDES = {"dist", "__pycache__", ".git", ".pytest_cache"}
+SOURCE_EXCLUDES = {
+    "dist",
+    "__pycache__",
+    ".git",
+    ".pytest_cache",
+    ".ci-test",
+    ".gui-test",
+}
 
 
 def _write_member(bundle, path, archive_name):
@@ -48,6 +55,8 @@ def main() -> None:
         if path.is_file()
         and not any(part in SOURCE_EXCLUDES for part in path.relative_to(ROOT).parts)
         and not path.name.endswith(".pyc")
+        and path.suffix != ".zip"
+        and not path.name.startswith("SHA256SUMS")
     )
     with zipfile.ZipFile(
         source_archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9

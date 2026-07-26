@@ -15,6 +15,8 @@
 - Fixed an Electrum 4.8.0 crash when clearing the Send tab after a Silent
   Payment. The plugin no longer calls Electrum's native field updater while
   its payment identifier is temporarily unset.
+- Reset the Pay-to field's green validated background to Electrum's native
+  palette when a Silent Payment is cleared.
 - Added the Silent Payments SVG mark to the Electrum plugin manifest.
 - Enabled both mainnet and test networks after running the complete offline
   construction, sealing, signing, receiver-derivation, signature-verification,

@@ -2,5 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 dist/
+.ci-test/
+.gui-test/
 *.zip
 SHA256SUMS*

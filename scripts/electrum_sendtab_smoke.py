@@ -66,6 +66,7 @@ class PayTo:
         self.textChanged = Signal()
         self.paymentIdentifierChanged = Signal()
         self.tooltip = ""
+        self.style_sheet = ""
         self.native_try_calls = []
 
     def try_payment_identifier(self, text):
@@ -77,6 +78,9 @@ class PayTo:
 
     def setToolTip(self, text):
         self.tooltip = text
+
+    def setStyleSheet(self, style_sheet):
+        self.style_sheet = style_sheet
 
 
 class AmountEdit:
@@ -117,6 +121,7 @@ class SendTab:
 
     def set_field_validated(self, _field, *, validated):
         self.validated = validated
+        _field.setStyleSheet("green" if validated else "red")
 
     def update_fields(self):
         self.update_fields_calls += 1
@@ -273,6 +278,7 @@ def main():
     uri = f"bitcoin:?sp={TESTNET_ADDRESS}&amount=0.00012345"
     send_tab.payto_e.try_payment_identifier(uri)
     assert send_tab.validated is True
+    assert send_tab.payto_e.style_sheet == "green"
     assert send_tab.amount_e.get_amount() == 12_345
     assert send_tab.send_button.enabled is True
     assert not send_tab.payto_e.native_try_calls
@@ -286,6 +292,9 @@ def main():
     # native update_fields() during that intermediate state.
     send_tab.payto_e.setText("")
     assert send_tab.update_fields_calls == 0
+    assert send_tab.payto_e.style_sheet == (
+        "QWidget { background-color: palette(base); }"
+    )
 
     send_tab.payto_e.setText("bc1qordinary")
     send_tab.send_button.func()

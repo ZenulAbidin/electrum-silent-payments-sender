@@ -17,7 +17,7 @@ Write "None" only after considering each area.
 - [ ] `python3 -m unittest discover -s tests -v`
 - [ ] `python3 scripts/build_release.py`
 - [ ] `python3 scripts/check_release.py dist/silent_payments_sender-1.0.0.zip`
-- [ ] `python3 scripts/electrum_sendtab_smoke.py --plugin dist/silent_payments_sender-1.0.0.zip`
+- [ ] Packaged Send-tab smoke test in a supported Electrum runtime
 - [ ] Relevant Electrum integration harnesses, or an explanation of why they
       are not required
 
