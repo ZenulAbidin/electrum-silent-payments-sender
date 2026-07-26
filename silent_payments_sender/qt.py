@@ -19,6 +19,7 @@ from .txflow import (
     annotate_silent_payment_output_addresses,
     confirm_transaction_compat,
     finalize_transaction,
+    make_unsigned_silent_transaction,
     normalize_silent_payment_records,
     seal_after_confirmation,
     silent_payment_history_label,
@@ -246,7 +247,8 @@ class Plugin(BasePlugin):
                 nonlocal_only=False,
                 confirmed_only=confirmed_only,
             )
-            tx = window.wallet.make_unsigned_transaction(
+            tx = make_unsigned_silent_transaction(
+                wallet=window.wallet,
                 fee_policy=fee_policy,
                 coins=coins,
                 outputs=[
@@ -255,11 +257,6 @@ class Plugin(BasePlugin):
                         value=amount_sat,
                     )
                 ],
-                base_tx=None,
-                is_sweep=False,
-                rbf=False,
-                send_change_to_lightning=False,
-                merge_duplicate_outputs=False,
             )
             finalized = finalize_transaction(
                 wallet=window.wallet,

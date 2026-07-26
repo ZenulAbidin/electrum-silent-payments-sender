@@ -24,6 +24,7 @@ from silent_payments_sender.txflow import (  # noqa: E402
     confirm_transaction_compat,
     finalize_transaction,
     full_silent_payment_output_label,
+    make_unsigned_silent_transaction,
     normalize_silent_payment_records,
     seal_after_confirmation,
     silent_payment_history_label,
@@ -134,6 +135,126 @@ class FakeWallet:
 
 
 class TxFlowTests(unittest.TestCase):
+
+    @staticmethod
+    def _change_policy_fixture(
+        *,
+        selected_change_addresses,
+        transaction_change_addresses,
+        multiple_change,
+        fee=1_000,
+    ):
+        outputs = [
+            SimpleNamespace(
+                address="bc1psilent",
+                is_change=False,
+                scriptpubkey=PLACEHOLDER_SCRIPT,
+            ),
+            *[
+                SimpleNamespace(
+                    address=address,
+                    is_change=True,
+                    scriptpubkey=b"change",
+                )
+                for address in transaction_change_addresses
+            ],
+        ]
+        tx = SimpleNamespace(
+            outputs=lambda: outputs,
+            inputs=lambda: [SimpleNamespace(address="bc1qinput")],
+            get_fee=lambda: fee,
+            estimated_size=lambda: 200,
+        )
+
+        class Wallet:
+            max_change_outputs = 3
+            network = None
+
+            def __init__(self):
+                self.multiple_change = multiple_change
+                self.make_kwargs = None
+
+            def get_change_addresses_for_new_transaction(self):
+                return list(selected_change_addresses)
+
+            def make_unsigned_transaction(self, **kwargs):
+                self.make_kwargs = kwargs
+                return tx
+
+            def dust_threshold(self):
+                return 546
+
+        fee_policy = SimpleNamespace(
+            estimate_fee=lambda _size, network=None: 1_000,
+        )
+        return Wallet(), tx, fee_policy
+
+    def test_change_addresses_are_passed_to_electrum(self):
+        addresses = ["bc1qchange0", "bc1qchange1", "bc1qchange2"]
+        wallet, tx, fee_policy = self._change_policy_fixture(
+            selected_change_addresses=addresses,
+            transaction_change_addresses=addresses,
+            multiple_change=True,
+        )
+        result = make_unsigned_silent_transaction(
+            wallet=wallet,
+            fee_policy=fee_policy,
+            coins=["coin"],
+            outputs=["silent-output"],
+        )
+        self.assertIs(result, tx)
+        self.assertEqual(addresses, wallet.make_kwargs["change_addr"])
+        self.assertFalse(wallet.make_kwargs["rbf"])
+
+    def test_change_returns_to_input_when_change_addresses_are_disabled(self):
+        wallet, tx, fee_policy = self._change_policy_fixture(
+            selected_change_addresses=[],
+            transaction_change_addresses=["bc1qinput"],
+            multiple_change=False,
+        )
+        result = make_unsigned_silent_transaction(
+            wallet=wallet,
+            fee_policy=fee_policy,
+            coins=["coin"],
+            outputs=["silent-output"],
+        )
+        self.assertIs(result, tx)
+        self.assertEqual([], wallet.make_kwargs["change_addr"])
+
+    def test_multiple_change_setting_is_enforced(self):
+        wallet, _tx, fee_policy = self._change_policy_fixture(
+            selected_change_addresses=["bc1qchange0"],
+            transaction_change_addresses=["bc1qchange0", "bc1qchange1"],
+            multiple_change=False,
+        )
+        with self.assertRaisesRegex(
+            DerivationFailure,
+            "multiple change outputs",
+        ):
+            make_unsigned_silent_transaction(
+                wallet=wallet,
+                fee_policy=fee_policy,
+                coins=["coin"],
+                outputs=["silent-output"],
+            )
+
+    def test_excessive_fee_without_change_is_rejected(self):
+        wallet, _tx, fee_policy = self._change_policy_fixture(
+            selected_change_addresses=["bc1qchange0"],
+            transaction_change_addresses=[],
+            multiple_change=False,
+            fee=50_000,
+        )
+        with self.assertRaisesRegex(
+            DerivationFailure,
+            "assigned the remainder",
+        ):
+            make_unsigned_silent_transaction(
+                wallet=wallet,
+                fee_policy=fee_policy,
+                coins=["coin"],
+                outputs=["silent-output"],
+            )
 
     def test_electrum_46_confirmation_api(self):
         class Window46:

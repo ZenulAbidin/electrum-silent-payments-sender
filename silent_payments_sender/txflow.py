@@ -31,6 +31,80 @@ OUTPUT_CONTINUATION_PREFIX = (" " * 15) + "\t"
 SILENT_ADDRESS_DISPLAY_EDGE_CHARS = 8
 
 
+def make_unsigned_silent_transaction(
+    *,
+    wallet,
+    fee_policy,
+    coins,
+    outputs,
+):
+    """Build with Electrum's wallet change policy and reject fee leakage."""
+    change_addresses = wallet.get_change_addresses_for_new_transaction()
+    tx = wallet.make_unsigned_transaction(
+        fee_policy=fee_policy,
+        coins=coins,
+        outputs=outputs,
+        change_addr=change_addresses,
+        base_tx=None,
+        is_sweep=False,
+        rbf=False,
+        send_change_to_lightning=False,
+        merge_duplicate_outputs=False,
+    )
+
+    silent_outputs = [
+        output for output in tx.outputs()
+        if output.scriptpubkey == PLACEHOLDER_SCRIPT
+    ]
+    if len(silent_outputs) != 1:
+        raise DerivationFailure(
+            "Expected exactly one silent-payment placeholder output."
+        )
+    change_outputs = [
+        output for output in tx.outputs()
+        if output is not silent_outputs[0]
+    ]
+    if not wallet.multiple_change and len(change_outputs) > 1:
+        raise DerivationFailure(
+            "Electrum created multiple change outputs while that setting is disabled."
+        )
+    if len(change_outputs) > wallet.max_change_outputs:
+        raise DerivationFailure("Electrum created too many change outputs.")
+
+    if change_addresses:
+        expected_addresses = set(change_addresses)
+        if any(output.address not in expected_addresses for output in change_outputs):
+            raise DerivationFailure(
+                "Electrum did not use the wallet's selected change addresses."
+            )
+    elif change_outputs:
+        input_addresses = {
+            txin.address for txin in tx.inputs()
+            if getattr(txin, "address", None)
+        }
+        if any(output.address not in input_addresses for output in change_outputs):
+            raise DerivationFailure(
+                "Electrum did not return change to a selected input address."
+            )
+
+    fee = tx.get_fee()
+    estimated_fee = fee_policy.estimate_fee(
+        tx.estimated_size(),
+        network=wallet.network,
+    )
+    allowed_rounding = wallet.dust_threshold() + 100
+    if (
+        not isinstance(fee, int)
+        or fee < 0
+        or fee > estimated_fee + allowed_rounding
+    ):
+        raise DerivationFailure(
+            "Electrum did not create a change output and assigned the remainder "
+            "to the transaction fee. Nothing was signed."
+        )
+    return tx
+
+
 def _display_chunks(address: str) -> list[str]:
     return [
         address[offset:offset + OUTPUT_DISPLAY_WIDTH]

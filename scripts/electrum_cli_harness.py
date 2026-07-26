@@ -39,6 +39,7 @@ from silent_payments_sender.core import (  # noqa: E402
 )
 from silent_payments_sender.txflow import (  # noqa: E402
     finalize_transaction,
+    make_unsigned_silent_transaction,
     seal_after_confirmation,
     verify_transaction,
 )
@@ -49,14 +50,14 @@ TEST_SEED = "bitter grass shiver impose acquire brush forget axis eager alone wi
 LEGACY_TEST_SEED = "cycle rocket west magnet parrot shuffle foot correct salt library feed song"
 NESTED_SEGWIT_ROOT_SEED = bytes.fromhex("42" * 32)
 INPUT_TYPES = ("p2pkh", "p2wpkh-p2sh", "p2wpkh")
-FUNDING_VALUE = 1_000_000
+FUNDING_VALUE = 10_000_000
 SEND_VALUE = 100_000
 FIXED_FEE = 1_000
 SCAN_SECRET = 11
 SPEND_SECRET = 29
 
 
-def make_wallet(config, input_type):
+def make_wallet(config, input_type, *, use_change, multiple_change):
     if input_type == "p2pkh":
         wallet_keystore = keystore.from_seed(
             LEGACY_TEST_SEED,
@@ -81,7 +82,9 @@ def make_wallet(config, input_type):
     db = WalletDB("", storage=None, upgrade=True)
     db.put("keystore", wallet_keystore.dump())
     db.put("gap_limit", 2)
-    db.put("gap_limit_for_change", 1)
+    db.put("gap_limit_for_change", 3)
+    db.put("use_change", use_change)
+    db.put("multiple_change", multiple_change)
     wallet = Standard_Wallet(db, config=config)
     wallet.synchronize()
     assert wallet.get_txin_type() == input_type
@@ -180,8 +183,13 @@ def verify_input_signatures(tx):
     return True
 
 
-def run_case(config, input_type):
-    wallet = make_wallet(config, input_type)
+def run_case(config, input_type, *, use_change, multiple_change):
+    wallet = make_wallet(
+        config,
+        input_type,
+        use_change=use_change,
+        multiple_change=multiple_change,
+    )
     funding_address = wallet.get_receiving_addresses()[0]
     funding_tx = make_synthetic_funding_tx(funding_address)
     wallet.adb.receive_tx_callback(
@@ -202,7 +210,8 @@ def run_case(config, input_type):
         silent_address,
         expected_hrp=hrp,
     )
-    tx = wallet.make_unsigned_transaction(
+    tx = make_unsigned_silent_transaction(
+        wallet=wallet,
         fee_policy=FixedFeePolicy(FIXED_FEE),
         coins=coins,
         outputs=[
@@ -211,9 +220,6 @@ def run_case(config, input_type):
                 value=SEND_VALUE,
             )
         ],
-        rbf=False,
-        send_change_to_lightning=False,
-        merge_duplicate_outputs=False,
     )
     finalized = finalize_transaction(
         wallet=wallet,
@@ -252,6 +258,24 @@ def run_case(config, input_type):
     )
     assert parsed.outputs()[finalized.output_index].value == SEND_VALUE
     assert tx.get_fee() == FIXED_FEE
+    assert sum(txin.value_sats() for txin in tx.inputs()) == (
+        sum(output.value for output in tx.outputs()) + tx.get_fee()
+    )
+    change_outputs = [
+        output for index, output in enumerate(tx.outputs())
+        if index != finalized.output_index
+    ]
+    assert sum(output.value for output in change_outputs) == (
+        FUNDING_VALUE - SEND_VALUE - FIXED_FEE
+    )
+    if use_change:
+        assert all(wallet.is_change(output.address) for output in change_outputs)
+        expected_change_count = 3 if multiple_change else 1
+        assert len(change_outputs) == expected_change_count
+    else:
+        assert len(change_outputs) == 1
+        assert change_outputs[0].address == funding_address
+        assert not wallet.is_change(change_outputs[0].address)
     assert all(txin.nsequence == 0xFFFFFFFE for txin in parsed.inputs())
 
     return {
@@ -263,6 +287,10 @@ def run_case(config, input_type):
         "outputs": len(tx.outputs()),
         "amount_sat": SEND_VALUE,
         "fee_sat": tx.get_fee(),
+        "change_outputs": len(change_outputs),
+        "change_sat": sum(output.value for output in change_outputs),
+        "use_change": use_change,
+        "multiple_change": multiple_change,
         "rbf": False,
         "silent_address": silent_address,
         "recipient_scriptpubkey": finalized.scriptpubkey.hex(),
@@ -301,8 +329,15 @@ async def async_main(*, network_name):
                 "electrum_version": ELECTRUM_VERSION,
                 "network": network_name,
                 "cases": [
-                    run_case(config, input_type)
+                    run_case(
+                        config,
+                        input_type,
+                        use_change=use_change,
+                        multiple_change=multiple_change,
+                    )
                     for input_type in INPUT_TYPES
+                    for use_change in (False, True)
+                    for multiple_change in (False, True)
                 ],
             }
             return result
