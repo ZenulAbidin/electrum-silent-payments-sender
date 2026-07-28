@@ -16,7 +16,7 @@ This is an independent plugin, not an official Electrum feature, and has not rec
 
 ## Features
 
-Version 1.0.0 targets BIP352 1.1.1 and supports:
+Version 1.0.1 targets BIP352 1.1.1 and supports:
 
 - Electrum 4.6.0 or newer, Qt desktop GUI
 - Standard, single-signature deterministic software wallets

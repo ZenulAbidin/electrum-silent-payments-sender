@@ -42,4 +42,4 @@ jobs:
         run: python3 scripts/build_release.py
 
       - name: Validate release archive
-        run: python3 scripts/check_release.py dist/silent_payments_sender-1.0.0.zip
+        run: python3 scripts/check_release.py dist/silent_payments_sender-1.0.1.zip

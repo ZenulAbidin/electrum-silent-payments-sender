@@ -6,8 +6,8 @@ authors:
   - family-names: "Sherief"
     given-names: "Ali"
     alias: "Zenul_Abidin"
-version: 1.0.0
-date-released: 2026-07-26
+version: 1.0.1
+date-released: 2026-07-28
 license: MIT
 repository-code: "https://github.com/ZenulAbidin/electrum-silent-payments-sender"
 url: "https://github.com/ZenulAbidin/electrum-silent-payments-sender"

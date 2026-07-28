@@ -7,7 +7,7 @@ From this repository:
 python3 -m unittest discover -s tests -v
 python3 scripts/electrum_cli_harness.py
 python3 scripts/build_release.py
-python3 scripts/check_release.py dist/silent_payments_sender-1.0.0.zip
+python3 scripts/check_release.py dist/silent_payments_sender-1.0.1.zip
 ```
 
 The tests are self-contained and run the actual plugin core against the complete upstream BIP352 1.1.1 vector corpus, executing every sender case within the plugin's documented scope with a small pure-Python secp256k1 test shim. The release checker also compiles every Python file and verifies the ZIP layout and manifest. See `CONFORMANCE.md` for the requirement matrix and explicit limits.

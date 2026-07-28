@@ -40,7 +40,7 @@ environment:
 
 ```bash
 python3 scripts/build_release.py
-python3 scripts/check_release.py dist/silent_payments_sender-1.0.0.zip
+python3 scripts/check_release.py dist/silent_payments_sender-1.0.1.zip
 ```
 
 The packaged Send-tab smoke test, Electrum integration harness, and recovery
@@ -50,7 +50,7 @@ harness require an extracted official Electrum AppImage runtime. For example:
 APPROOT=/path/to/squashfs-root
 LD_LIBRARY_PATH="$APPROOT/usr/lib:$APPROOT/usr/lib/x86_64-linux-gnu" \
   "$APPROOT/usr/bin/python3" -s scripts/electrum_sendtab_smoke.py \
-  --plugin dist/silent_payments_sender-1.0.0.zip
+  --plugin dist/silent_payments_sender-1.0.1.zip
 ```
 
 The remaining offline harness usage is documented in [README.md](README.md).
