@@ -56,7 +56,7 @@ Coin control is supported through Electrum's normal Coins tab selection. If an e
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
 - Use [GitHub Discussions](https://github.com/ZenulAbidin/electrum-silent-payments-sender/discussions) for usage questions and [GitHub Issues](https://github.com/ZenulAbidin/electrum-silent-payments-sender/issues) for reproducible non-security bugs.
 - Read [SECURITY.md](SECURITY.md) and use [private vulnerability reporting](https://github.com/ZenulAbidin/electrum-silent-payments-sender/security/advisories/new) for security-sensitive reports. Never post wallet seeds, private keys, or other secrets.
-- Feel free to reach out to me on [X/Twitter](https://x.com/ZenulAbidin) and follow if you like my work.
+- Feel free to reach out to me on [X/Twitter](https://x.com/Zenul_Abidin) and follow if you like my work.
 
 ## License and attribution
 
