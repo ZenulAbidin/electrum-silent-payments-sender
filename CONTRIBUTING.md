@@ -17,7 +17,7 @@ correctness, narrow scope, and reviewability take priority over feature speed.
 
 ## Supported contribution scope
 
-Version 1.0.x intentionally supports one BIP352 recipient and one payment
+Version 1.1.x intentionally supports one BIP352 recipient and one payment
 output from a standard, single-signature deterministic Electrum software
 wallet. See [README.md](README.md) and [CONFORMANCE.md](CONFORMANCE.md) for the
 complete supported and rejected cases.
@@ -40,7 +40,7 @@ environment:
 
 ```bash
 python3 scripts/build_release.py
-python3 scripts/check_release.py dist/silent_payments_sender-1.0.1.zip
+python3 scripts/check_release.py dist/silent_payments_sender-1.1.0.zip
 ```
 
 The packaged Send-tab smoke test, Electrum integration harness, and recovery
@@ -50,7 +50,7 @@ harness require an extracted official Electrum AppImage runtime. For example:
 APPROOT=/path/to/squashfs-root
 LD_LIBRARY_PATH="$APPROOT/usr/lib:$APPROOT/usr/lib/x86_64-linux-gnu" \
   "$APPROOT/usr/bin/python3" -s scripts/electrum_sendtab_smoke.py \
-  --plugin dist/silent_payments_sender-1.0.1.zip
+  --plugin dist/silent_payments_sender-1.1.0.zip
 ```
 
 The remaining offline harness usage is documented in [README.md](README.md).

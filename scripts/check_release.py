@@ -39,8 +39,15 @@ def main() -> None:
             raise SystemExit("incomplete manifest")
         if manifest["name"] != "silent_payments_sender":
             raise SystemExit("manifest name does not match ZIP root")
+        floor = (4, 8, 3)  # first Electrum with the CVE-2026-117601 fix
+        if tuple(int(x) for x in manifest["min_electrum_version"].split(".")) < floor:
+            raise SystemExit("min_electrum_version is below the security floor 4.8.3")
         if "qt" not in manifest["available_for"]:
             raise SystemExit("plugin is not marked available for Qt")
+        if "qml" in manifest["available_for"]:
+            for member in ("qml.py", "qml/SilentPaymentsSender.qml"):
+                if f"silent_payments_sender/{member}" not in names:
+                    raise SystemExit(f"QML support declared but {member} is missing")
         if icon := manifest.get("icon"):
             icon_name = f"silent_payments_sender/{icon}"
             if icon_name not in names:

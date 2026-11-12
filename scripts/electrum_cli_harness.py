@@ -47,7 +47,7 @@ from silent_payments_sender.txflow import (  # noqa: E402
 )
 
 
-TESTED_ELECTRUM_VERSIONS = ("4.6.0", "4.7.2", "4.8.0")
+TESTED_ELECTRUM_VERSIONS = ("4.8.3", "4.8.4")
 TEST_SEED = "bitter grass shiver impose acquire brush forget axis eager alone wine silver"
 LEGACY_TEST_SEED = "cycle rocket west magnet parrot shuffle foot correct salt library feed song"
 NESTED_SEGWIT_ROOT_SEED = bytes.fromhex("42" * 32)

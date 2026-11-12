@@ -33,7 +33,7 @@ except ImportError as exc:
     except ImportError:
         raise SystemExit(
             "Run this utility from the unpacked source archive with Python 3, "
-            "or in an Electrum 4.6.0+ Python environment."
+            "or in an Electrum 4.8.3+ Python environment."
         ) from exc
 
 

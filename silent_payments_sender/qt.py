@@ -21,51 +21,21 @@ from .txflow import (
     finalize_transaction,
     get_silent_payment_coins,
     make_unsigned_silent_transaction,
-    normalize_silent_payment_records,
     seal_after_confirmation,
     silent_payment_history_label,
     validate_wallet,
     verify_transaction,
 )
-
-SILENT_PAYMENT_RECORDS_KEY = "silent_payments_sender_records"
+from .records import (
+    SILENT_PAYMENT_RECORDS_KEY,
+    get_silent_payment_record as _get_silent_payment_record,
+    store_silent_payment_record as _store_silent_payment_record,
+)
 
 
 def _payto_text(send_tab) -> str:
     """Read Electrum's single-recipient Pay-to field across supported versions."""
     return send_tab.payto_e.line_edit.text().strip()
-
-
-def _store_silent_payment_record(
-    wallet,
-    *,
-    txid: str,
-    recipient_address: str,
-    derived_address: str,
-) -> None:
-    records = normalize_silent_payment_records(
-        wallet.db.get(SILENT_PAYMENT_RECORDS_KEY, {})
-    )
-    records[str(txid)] = {
-        "recipient_address": str(recipient_address),
-        "derived_address": str(derived_address),
-    }
-    wallet.db.put(SILENT_PAYMENT_RECORDS_KEY, records)
-    wallet.save_db()
-
-
-def _get_silent_payment_record(wallet, txid: str):
-    records = wallet.db.get(SILENT_PAYMENT_RECORDS_KEY, {})
-    if not isinstance(records, dict):
-        return None
-    record = records.get(txid)
-    if not isinstance(record, dict):
-        return None
-    recipient = record.get("recipient_address")
-    derived = record.get("derived_address")
-    if not isinstance(recipient, str) or not isinstance(derived, str):
-        return None
-    return recipient, derived
 
 
 class Plugin(BasePlugin):

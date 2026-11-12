@@ -1,0 +1,49 @@
+{
+  "amount_in_uri": false,
+  "amount_prefilled": "",
+  "amount_sat": 1234567,
+  "auth_dialog": "Sign and send on-chain transaction?",
+  "balance_before": 2000000,
+  "confirm_outputs": [
+    {
+      "address": "2N5hCAvBCPCVz6UgnznSe8rLXnJhXbHkG25",
+      "value": 765165
+    },
+    {
+      "address": "tsp1qq06\u2026pcaw3qtp (bcrt1pc5\u20267q2h7h4v)",
+      "value": 1234567
+    }
+  ],
+  "confirmations": 1,
+  "electrum_version": "4.8.3",
+  "export_refused": true,
+  "finalizer_class": "SilentPaymentTxFinalizer",
+  "gui": "qml",
+  "label": "regtest harness",
+  "plugin_qml_loaded": true,
+  "plugin_zip": "silent_payments_sender-1.1.0.zip",
+  "receiver_scan": {
+    "matches": [
+      {
+        "amount_sat": 1234567,
+        "bip352_output_counter": 0,
+        "output_index": 1,
+        "scriptpubkey": "5120c50470644dda72d461db766e3e354be2ef1e20690b40547487011b43774259fc"
+      }
+    ],
+    "network": "testnet",
+    "silent_payment_address": "tsp1qq06mw5gk6qz5wswyn96ng0shzyfyc3vyjpmgztxcnxe64x6unmcewq6c3l0sx4qzh3dku285djtsy3vsvfa9p3mkpt33gtr8tuyraeyxpcaw3qtp",
+    "status": "match",
+    "txid": "c40a747a8602c4404a3bd10040fb9d73ee4ba17b76ccac2687831df448718b75"
+  },
+  "record_stored": true,
+  "rejected_inputs": {
+    "bad_checksum": "Invalid BIP352 address: silent payment addresses must use Bech32m",
+    "wrong_network": "Invalid BIP352 address: expected an tsp address"
+  },
+  "script_type": "p2wpkh-p2sh",
+  "silent_payment_address": "tsp1qq06mw5gk6qz5wswyn96ng0shzyfyc3vyjpmgztxcnxe64x6unmcewq6c3l0sx4qzh3dku285djtsy3vsvfa9p3mkpt33gtr8tuyraeyxpcaw3qtp",
+  "tx_rbf_signalled": false,
+  "txid": "c40a747a8602c4404a3bd10040fb9d73ee4ba17b76ccac2687831df448718b75",
+  "valid_after_fee_change": true
+}

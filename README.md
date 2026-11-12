@@ -6,7 +6,7 @@
 
 ![Silent Payments Sender logo](https://talkimg.com/images/2026/07/26/Uh9ryv.png)
 
-A sender implementation of [BIP352 Silent Payments](https://bips.dev/352/) for Electrum's Qt desktop wallet.
+A sender implementation of [BIP352 Silent Payments](https://bips.dev/352/) for Electrum's Qt desktop wallet and its QML (mobile) interface.
 
 It integrates directly into Electrum's existing **Send** tab. Paste a Silent Payment address into **Pay to**, enter the amount, and press **Pay…** as usual. The plugin detects the address and builds a normal Bitcoin transaction whose recipient output is derived from the wallet's selected inputs. 
 
@@ -16,9 +16,9 @@ This is an independent plugin, not an official Electrum feature, and has not rec
 
 ## Features
 
-Version 1.0.1 targets BIP352 1.1.1 and supports:
+Version 1.1.0 targets BIP352 1.1.2 and supports:
 
-- Electrum 4.6.0 or newer, Qt desktop GUI
+- Electrum 4.8.3 or newer, Qt desktop GUI and QML GUI (4.8.3 fixes CVE-2026-117601, a server-side transaction-replacement attack)
 - Standard, single-signature deterministic software wallets
 - Compressed-key P2PKH, nested SegWit, and native SegWit inputs
 - `sp1...` on mainnet and `tsp1...` on testnet, signet, or regtest
@@ -50,6 +50,12 @@ In Electrum's **New Transaction** send preview, the payment output uses the comp
 Both the Silent Payment address and the derived Taproot address can be copied from the transaction details dialog.
 
 Coin control is supported through Electrum's normal Coins tab selection. If an extremely unlikely invalid scalar is encountered, select a different set of coins and retry.
+
+## QML GUI
+
+The QML GUI is the interface of Electrum for Android. On desktop it runs with `electrum -g qml`. Scan, paste, or open a Silent Payment address or BIP21 `sp` link as usual. The plugin asks for the amount, then shows Electrum's normal fee confirmation, and signs after Electrum's usual payment authentication.
+
+The QML GUI cannot install or authorize external plugins. On desktop, add and enable the plugin in the normal Qt GUI first; the QML GUI then loads it. Electrum for Android does not allow external plugins at all yet, so phone support depends on Electrum adding that.
 
 ## Community and support
 

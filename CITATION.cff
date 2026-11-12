@@ -6,11 +6,11 @@ authors:
   - family-names: "Sherief"
     given-names: "Ali"
     alias: "Zenul_Abidin"
-version: 1.0.1
-date-released: 2026-07-28
+version: 1.1.0
+date-released: 2026-11-12
 license: MIT
 repository-code: "https://github.com/ZenulAbidin/electrum-silent-payments-sender"
 url: "https://github.com/ZenulAbidin/electrum-silent-payments-sender"
 abstract: >-
   An experimental BIP352 Silent Payments sender plugin for the Electrum Qt
-  desktop wallet.
+  desktop and QML wallets.

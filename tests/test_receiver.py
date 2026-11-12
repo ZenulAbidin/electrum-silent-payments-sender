@@ -72,7 +72,7 @@ class TestReceiverUtility(unittest.TestCase):
         results = json.loads(
             (
                 ROOT
-                / "test-results/electrum-4.8.0-testnet-cli-integration.json"
+                / "test-results/electrum-4.8.4-testnet-cli-integration.json"
             ).read_text(encoding="utf-8")
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -107,7 +107,7 @@ class TestReceiverUtility(unittest.TestCase):
         results = json.loads(
             (
                 ROOT
-                / "test-results/electrum-4.8.0-mainnet-cli-integration.json"
+                / "test-results/electrum-4.8.4-mainnet-cli-integration.json"
             ).read_text(encoding="utf-8")
         )
         receiving_case = results["cases"][2]

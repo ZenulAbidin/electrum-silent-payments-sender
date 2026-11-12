@@ -10,6 +10,7 @@ from .core import (
     SUPPORTED_TXIN_TYPES,
     DerivationFailure,
     SilentPaymentAddress,
+    SilentPaymentError,
     UnsupportedWallet,
     derive_output_script,
     transaction_commitment,

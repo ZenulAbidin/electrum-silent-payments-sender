@@ -49,4 +49,4 @@ Check `input_amount_sat`, `fee_sat`, `output_amount_sat`, and `destination` in t
 
 Keep the receiver JSON even after recovery. The receiving transaction is public once broadcast and can be retrieved again by txid, but the two private secrets in the JSON cannot be reconstructed if every backup is lost.
 
-Electrum's ordinary private-key import/sweep dialog cannot recover this output: it does not support a raw Silent Payment Taproot output key. The dedicated recovery command signs the direct BIP341 key-path spend. Its signatures are independently checked against Electrum's BIP341 implementation by `scripts/electrum_recovery_harness.py` under Electrum 4.6.0, 4.7.2, and 4.8.0.
+Electrum's ordinary private-key import/sweep dialog cannot recover this output: it does not support a raw Silent Payment Taproot output key. The dedicated recovery command signs the direct BIP341 key-path spend. Its signatures are independently checked against Electrum's BIP341 implementation by `scripts/electrum_recovery_harness.py` under Electrum 4.8.3 and 4.8.4.
