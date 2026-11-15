@@ -31,6 +31,7 @@ from .records import (
     get_silent_payment_record as _get_silent_payment_record,
     store_silent_payment_record as _store_silent_payment_record,
 )
+from .receive_qt import ReceiveTab, can_receive
 
 
 def _payto_text(send_tab) -> str:
@@ -44,6 +45,36 @@ class Plugin(BasePlugin):
     def init_menubar(self, window):
         """Install into the existing Send tab after Electrum has constructed it."""
         self._integrate_send_tab(window)
+        self._add_receive_tab(window)
+
+    @hook
+    def on_close_window(self, window):
+        self._remove_receive_tab(window)
+
+    def on_close(self):
+        for window in list(self._receive_tabs()):
+            self._remove_receive_tab(window)
+
+    def _receive_tabs(self) -> dict:
+        if not hasattr(self, "_receive_tab_by_window"):
+            self._receive_tab_by_window = {}
+        return self._receive_tab_by_window
+
+    def _add_receive_tab(self, window) -> None:
+        if window in self._receive_tabs() or not can_receive(window.wallet):
+            return
+        tab = ReceiveTab(window)
+        window.tabs.addTab(tab, _("Silent Payments"))
+        self._receive_tabs()[window] = tab
+
+    def _remove_receive_tab(self, window) -> None:
+        tab = self._receive_tabs().pop(window, None)
+        if tab is None:
+            return
+        tab.close()
+        index = window.tabs.indexOf(tab)
+        if index >= 0:
+            window.tabs.removeTab(index)
 
     @hook
     def transaction_dialog_update(self, dialog):
