@@ -50,6 +50,7 @@ from .spscand_client import (
 from .txflow import silent_payment_history_label
 
 REFRESH_MS = 15_000
+EVENT_WAIT = 25  # seconds a request for news is held open by spscand
 
 UNCONFIRMED_WARNING = _(
     "Spending a payment that is not confirmed yet is risky: if the sender replaces "
@@ -129,6 +130,10 @@ class ReceiveTab(QWidget):
         self.timer.setInterval(REFRESH_MS)
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
+        self._closed = threading.Event()
+        threading.Thread(
+            target=self._follow_events, name="spscand-events", daemon=True
+        ).start()
         self.update_view()
         self.refresh()
 
@@ -334,8 +339,36 @@ class ReceiveTab(QWidget):
         if SpendDialog(self, settings, candidates).exec():
             self.refresh()
 
+    def _follow_events(self) -> None:
+        """Refresh as soon as spscand reports something, instead of at the next poll."""
+        since, boot = 0, None
+        while not self._closed.is_set():
+            try:
+                settings = load_settings(self.wallet)
+            except ReceiveSetupError:
+                settings = None
+            if settings is None or not settings.url:
+                self._closed.wait(REFRESH_MS / 1000)
+                continue
+            try:
+                news = self.client(settings).events(since, boot, EVENT_WAIT)
+            except SpscandError as exc:
+                if "HTTP 404" in str(exc):
+                    return  # an spscand without events: the timer keeps polling
+                self._closed.wait(REFRESH_MS / 1000)
+                continue
+            except Exception:
+                self._closed.wait(REFRESH_MS / 1000)
+                continue
+            if self._closed.is_set():
+                return  # the tab is gone
+            if news["events"] or news.get("reset"):
+                self._in_gui.emit(self.refresh)
+            since, boot = news["last"], news["boot"]
+
     def close(self) -> None:
         self.timer.stop()
+        self._closed.set()
 
 
 class ReceiveSettingsDialog(WindowModalDialog):

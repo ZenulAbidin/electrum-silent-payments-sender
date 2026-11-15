@@ -217,6 +217,22 @@ class SpscandClient:
             raise SpscandError("spscand sent an invalid answer for the new label.")
         return result
 
+    def events(self, since: int, boot: Optional[str], wait: float) -> dict:
+        """News after event number since, waiting up to wait seconds:
+        {"boot", "last", "reset", "events"}."""
+        query = {"since": since, "wait": wait}
+        if boot:
+            query["boot"] = boot
+        result = self._get("/v1/events", query)
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("boot"), str)
+            or not isinstance(result.get("last"), int)
+            or not isinstance(result.get("events"), list)
+        ):
+            raise SpscandError("spscand sent an invalid event list.")
+        return result
+
     def rescan(self, from_height: int) -> int:
         """Ask spscand to scan again from this height; returns the height it took."""
         result = self._get("/v1/rescan", post={"from": from_height})

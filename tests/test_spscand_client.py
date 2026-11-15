@@ -61,6 +61,20 @@ class FakeSpscand:
                 {"label": m, "comment": c, "address": f"tsp1qlabel{m}"}
                 for m, c in self.labels.items()
             ]
+        elif path.startswith("v1/events"):
+            body = {
+                "boot": "b00t",
+                "last": 3,
+                "reset": False,
+                "events": [
+                    {
+                        "seq": 3,
+                        "event": "block.scanned",
+                        "time": 1,
+                        "data": {"height": 104},
+                    }
+                ],
+            }
         elif path == "v1/rescan" and json_body is not None:
             body = {"from": json_body["from"]}
         elif path == "v1/labels" and json_body is not None:
@@ -213,6 +227,24 @@ class TestClient(unittest.TestCase):
         self.assertEqual((added["label"], added["address"]), (2, "tsp1qlabel2"))
         self.assertEqual(fake.bodies[-1], {"comment": "donations"})
         self.assertTrue(fake.requests[-1][0].endswith("/v1/labels"))
+
+    def test_events(self):
+        fake = FakeSpscand()
+        client = SpscandClient(
+            "http://127.0.0.1:7352", "t0ken", fake, proxy_enabled=False
+        )
+        news = client.events(2, "b00t", 25)
+        self.assertEqual(news["last"], 3)
+        self.assertIn("since=2", fake.requests[-1][0])
+        self.assertIn("boot=b00t", fake.requests[-1][0])
+        self.assertIn("wait=25", fake.requests[-1][0])
+
+        def broken(url, headers, use_proxy, json_body=None):
+            return 200, b'{"boot": "b", "events": "nope"}'
+
+        client.fetch = broken
+        with self.assertRaisesRegex(SpscandError, "invalid event list"):
+            client.events(0, None, 0)
 
     def test_rescan(self):
         fake = FakeSpscand()
