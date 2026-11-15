@@ -8,11 +8,12 @@ have been lost.
 
 | Version | Supported |
 | --- | --- |
-| 1.1.x | Yes |
+| 1.2.x | Yes |
+| 1.1.x | No (use 1.2.x) |
 | 1.0.x | No (requires Electrum versions affected by CVE-2026-117601) |
 | Earlier unpublished builds | No |
 
-Only the latest published 1.1.x release receives security fixes.
+Only the latest published 1.2.x release receives security fixes.
 
 ## Report a vulnerability privately
 

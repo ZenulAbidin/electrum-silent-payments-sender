@@ -5,7 +5,7 @@ From this repository:
 ```bash
 python3 -m unittest discover -s tests -v
 python3 scripts/build_release.py
-python3 scripts/check_release.py dist/silent_payments_sender-1.1.0.zip
+python3 scripts/check_release.py dist/silent_payments_sender-1.2.0.zip
 ```
 
 The unit tests are self-contained and run the actual plugin core against the complete upstream BIP352 1.1.2 vector corpus, executing every sender case within the plugin's documented scope with a small pure-Python secp256k1 test shim. Every other official vector must be listed with the reason it is out of scope. The release checker also compiles every Python file, verifies the ZIP layout and manifest, checks that declared QML support ships its files, and rejects a `min_electrum_version` below 4.8.3. See `docs/conformance.md` for the requirement matrix and explicit limits.
@@ -23,7 +23,7 @@ python3 scripts/electrum_cli_harness.py --network mainnet \
   --output test-results/electrum-VERSION-mainnet-cli-integration.json
 python3 scripts/electrum_recovery_harness.py \
   --output test-results/electrum-VERSION-mainnet-recovery-integration.json
-python3 scripts/electrum_sendtab_smoke.py --plugin dist/silent_payments_sender-1.1.0.zip
+python3 scripts/electrum_sendtab_smoke.py --plugin dist/silent_payments_sender-1.2.0.zip
 ```
 
 ### Regtest GUI harness
@@ -34,7 +34,7 @@ It needs a regtest `bitcoind` with a funded wallet named `miner`, an Electrum se
 
 ```bash
 PYTHONPATH=/path/to/electrum python3 scripts/electrum_regtest_harness.py \
-  --gui qml --zip dist/silent_payments_sender-1.1.0.zip \
+  --gui qml --zip dist/silent_payments_sender-1.2.0.zip \
   --workdir /path/to/scratch --server 127.0.0.1:60401:t \
   --bitcoin-cli bitcoin-cli --bitcoin-cli-arg=-regtest \
   --script-type p2wpkh --output result.json

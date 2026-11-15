@@ -49,7 +49,7 @@ class FakeSpscand:
         path = url.split("://", 1)[1].split("/", 1)[1]
         if path == "v1/status":
             body = {
-                "version": "0.2.0",
+                "version": "0.1.1",
                 "network": "regtest",
                 "scanned_height": 103,
                 "tip": 103,

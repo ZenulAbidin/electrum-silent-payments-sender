@@ -196,7 +196,7 @@ class SpscandClient:
         status = self._get("/v1/status")
         if not isinstance(status, dict) or not isinstance(status.get("version"), str):
             raise SpscandError(
-                "This spscand is too old: version 0.2.0 or newer is needed."
+                "This spscand is too old: version 0.1.1 or newer is needed."
             )
         return status
 
