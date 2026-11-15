@@ -61,6 +61,8 @@ class FakeSpscand:
                 {"label": m, "comment": c, "address": f"tsp1qlabel{m}"}
                 for m, c in self.labels.items()
             ]
+        elif path == "v1/rescan" and json_body is not None:
+            body = {"from": json_body["from"]}
         elif path == "v1/labels" and json_body is not None:
             m = max(self.labels, default=0) + 1
             self.labels[m] = json_body.get("comment", "")
@@ -211,6 +213,14 @@ class TestClient(unittest.TestCase):
         self.assertEqual((added["label"], added["address"]), (2, "tsp1qlabel2"))
         self.assertEqual(fake.bodies[-1], {"comment": "donations"})
         self.assertTrue(fake.requests[-1][0].endswith("/v1/labels"))
+
+    def test_rescan(self):
+        fake = FakeSpscand()
+        client = SpscandClient(
+            "http://127.0.0.1:7352", "t0ken", fake, proxy_enabled=False
+        )
+        self.assertEqual(client.rescan(250), 250)
+        self.assertEqual(fake.bodies[-1], {"from": 250})
 
     def test_changes_without_a_token(self):
         def no_token(url, headers, use_proxy, json_body=None):

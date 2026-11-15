@@ -217,6 +217,13 @@ class SpscandClient:
             raise SpscandError("spscand sent an invalid answer for the new label.")
         return result
 
+    def rescan(self, from_height: int) -> int:
+        """Ask spscand to scan again from this height; returns the height it took."""
+        result = self._get("/v1/rescan", post={"from": from_height})
+        if not isinstance(result, dict) or not isinstance(result.get("from"), int):
+            raise SpscandError("spscand sent an invalid answer to the rescan request.")
+        return result["from"]
+
     def outputs(self, since_height: Optional[int] = None) -> list[ReceivedOutput]:
         query = {"since_height": since_height} if since_height is not None else None
         rows = self._get("/v1/outputs", query)

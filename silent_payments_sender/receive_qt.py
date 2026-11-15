@@ -102,6 +102,8 @@ class ReceiveTab(QWidget):
         self.setup_button.clicked.connect(self.open_settings)
         self.refresh_button = QPushButton(_("Refresh"))
         self.refresh_button.clicked.connect(self.refresh)
+        self.rescan_button = QPushButton(_("Rescan…"))
+        self.rescan_button.clicked.connect(self.rescan)
         self.label_button = QPushButton(_("New labelled address…"))
         self.label_button.clicked.connect(self.new_label)
         self.spend_button = QPushButton(_("Spend…"))
@@ -110,6 +112,7 @@ class ReceiveTab(QWidget):
         self.buttons.addWidget(self.setup_button)
         self.buttons.addStretch(1)
         self.buttons.addWidget(self.refresh_button)
+        self.buttons.addWidget(self.rescan_button)
         self.buttons.addWidget(self.label_button)
         self.buttons.addWidget(self.spend_button)
 
@@ -160,6 +163,7 @@ class ReceiveTab(QWidget):
         self.address_e.setText(settings.address if settings else "")
         self.refresh_button.setEnabled(configured)
         self.label_button.setEnabled(configured)
+        self.rescan_button.setEnabled(configured)
         self.spend_button.setEnabled(configured)
         if settings is None:
             self._set_status(
@@ -288,6 +292,34 @@ class ReceiveTab(QWidget):
             self.refresh()
 
         self._background(lambda: self.client(settings).add_label(comment.strip()), done)
+
+    def rescan(self) -> None:
+        settings = self.settings()
+        if settings is None or not settings.url:
+            return
+        height, ok = QInputDialog.getInt(
+            self,
+            _("Rescan"),
+            _(
+                "spscand forgets what it found from this block on and scans again. "
+                "Start at block:"
+            ),
+            value=settings.birthday,
+            min=0,
+        )
+        if not ok:
+            return
+
+        def done(started, error):
+            if error is not None:
+                self.window.show_error(_("spscand: {}").format(error))
+                return
+            self._set_status(
+                _("spscand is scanning again from block {}.").format(started)
+            )
+            self.refresh()
+
+        self._background(lambda: self.client(settings).rescan(height), done)
 
     def open_spend(self) -> None:
         settings = self.settings()
