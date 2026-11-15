@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import threading
 
-from PyQt6.QtCore import QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFormLayout,
@@ -36,7 +36,8 @@ from .receive_keys import (
     load_settings,
     save_settings,
 )
-from .receive_state import balance, display_order, status_text
+from .receive_spend import SpendError, build_signed_spend
+from .receive_state import balance, display_order, spendable, status_text
 from .spscand_client import (
     SpscandClient,
     SpscandError,
@@ -96,10 +97,13 @@ class ReceiveTab(QWidget):
         self.setup_button.clicked.connect(self.open_settings)
         self.refresh_button = QPushButton(_("Refresh"))
         self.refresh_button.clicked.connect(self.refresh)
+        self.spend_button = QPushButton(_("Spend…"))
+        self.spend_button.clicked.connect(self.open_spend)
         self.buttons = QHBoxLayout()
         self.buttons.addWidget(self.setup_button)
         self.buttons.addStretch(1)
         self.buttons.addWidget(self.refresh_button)
+        self.buttons.addWidget(self.spend_button)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.status_label)
@@ -146,6 +150,7 @@ class ReceiveTab(QWidget):
         )
         self.address_e.setText(settings.address if settings else "")
         self.refresh_button.setEnabled(configured)
+        self.spend_button.setEnabled(configured)
         if settings is None:
             self._set_status(
                 _(
@@ -226,6 +231,19 @@ class ReceiveTab(QWidget):
         dialog = ReceiveSettingsDialog(self)
         if dialog.exec():
             self.update_view()
+            self.refresh()
+
+    def open_spend(self) -> None:
+        settings = self.settings()
+        if settings is None:
+            return
+        candidates = spendable(
+            self.outputs, allow_unconfirmed=settings.allow_unconfirmed
+        )
+        if not candidates:
+            self.window.show_message(_("There are no payments to spend yet."))
+            return
+        if SpendDialog(self, settings, candidates).exec():
             self.refresh()
 
     def close(self) -> None:
@@ -362,3 +380,113 @@ class ReceiveSettingsDialog(WindowModalDialog):
             bip39_words=self.words_e.text() if self.words_e else "",
             bip39_passphrase=self.passphrase_e.text() if self.passphrase_e else "",
         )
+
+
+class SpendDialog(WindowModalDialog):
+    """Send received payments to an address, signing in this wallet."""
+
+    def __init__(self, tab: ReceiveTab, settings, candidates):
+        super().__init__(tab.window, _("Spend silent payments"))
+        self.tab, self.window, self.wallet = tab, tab.window, tab.wallet
+        self.settings = settings
+        self.candidates = candidates
+        fmt = self.window.format_amount_and_units
+
+        layout = QVBoxLayout(self)
+        self.list = QTreeWidget()
+        self.list.setHeaderLabels([_("Payment"), _("Amount"), _("Status")])
+        self.list.setRootIsDecorated(False)
+        for output in candidates:
+            item = QTreeWidgetItem(
+                [output.outpoint, fmt(output.amount), status_text(output)]
+            )
+            item.setCheckState(0, Qt.CheckState.Checked)
+            self.list.addTopLevelItem(item)
+        layout.addWidget(self.list)
+
+        form = QFormLayout()
+        self.destination_e = QLineEdit(self.wallet.get_receiving_address())
+        self.amount_e = QLineEdit()
+        self.amount_e.setPlaceholderText(_("everything selected, minus the fee"))
+        self.fee_rate_e = QLineEdit(f"{self._default_fee_rate():g}")
+        form.addRow(_("Pay to"), self.destination_e)
+        form.addRow(_("Amount (sat)"), self.amount_e)
+        form.addRow(_("Fee rate (sat/vB)"), self.fee_rate_e)
+        layout.addLayout(form)
+        if any(not o.confirmed for o in candidates):
+            warning = QLabel(UNCONFIRMED_WARNING)
+            warning.setWordWrap(True)
+            warning.setStyleSheet(ColorScheme.RED.as_stylesheet())
+            layout.addWidget(warning)
+        layout.addLayout(
+            Buttons(CancelButton(self), OkButton(self, _("Sign and send")))
+        )
+
+    def _default_fee_rate(self) -> float:
+        from electrum.fee_policy import FeePolicy
+
+        try:
+            per_kb = FeePolicy(self.window.config.FEE_POLICY).fee_per_kb(
+                self.window.network
+            )
+        except Exception:
+            per_kb = None
+        return max(1.0, per_kb / 1000) if per_kb else 2.0
+
+    def selected(self):
+        return [
+            output
+            for index, output in enumerate(self.candidates)
+            if self.list.topLevelItem(index).checkState(0) == Qt.CheckState.Checked
+        ]
+
+    def accept(self) -> None:
+        try:
+            amount_text = self.amount_e.text().strip()
+            amount = int(amount_text) if amount_text else None
+            fee_rate = float(self.fee_rate_e.text())
+        except ValueError:
+            self.show_error(
+                _("Enter the amount in satoshis and the fee rate as a number.")
+            )
+            return
+        password = None
+        if self.wallet.has_password():
+            password = self.window.get_password(
+                message=_("Password needed to sign with your silent payment key.")
+            )
+            if password is None:
+                return
+        try:
+            spend_secret = self.settings.spend_secret(
+                self.wallet.get_keystore(), password
+            )
+            tx = build_signed_spend(
+                self.selected(),
+                spend_secret=spend_secret,
+                destination=self.destination_e.text().strip(),
+                change_address=self.wallet.get_single_change_address_for_new_transaction()
+                or self.wallet.get_receiving_address(),
+                amount=amount,
+                fee_rate=fee_rate,
+                locktime=self.wallet.adb.get_local_height(),
+            )
+        except (ReceiveSetupError, SpendError) as exc:
+            self.show_error(str(exc))
+            return
+        except Exception as exc:
+            self.show_error(_("Could not build the transaction: {}").format(exc))
+            return
+        fee = sum(o.amount for o in self.selected()) - sum(
+            o.value for o in tx.outputs()
+        )
+        fmt = self.window.format_amount_and_units
+        sent = tx.outputs()[0].value if len(tx.outputs()) == 1 else (amount or 0)
+        if not self.question(
+            _("Send {} to {}?\nFee: {}").format(
+                fmt(sent), self.destination_e.text().strip(), fmt(fee)
+            )
+        ):
+            return
+        super().accept()
+        self.window.broadcast_or_show(tx)
