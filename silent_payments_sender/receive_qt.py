@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -67,12 +68,14 @@ def can_receive(wallet) -> bool:
 
 class ReceiveTab(QWidget):
     _loaded = pyqtSignal(object, object, object)  # status, outputs, error
+    _in_gui = pyqtSignal(object)  # a function to run on the GUI thread
 
     def __init__(self, window):
         super().__init__()
         self.window = window
         self.wallet = window.wallet
         self.outputs = []
+        self.labels = {}
         self._busy = False
 
         self.status_label = QLabel()
@@ -99,12 +102,15 @@ class ReceiveTab(QWidget):
         self.setup_button.clicked.connect(self.open_settings)
         self.refresh_button = QPushButton(_("Refresh"))
         self.refresh_button.clicked.connect(self.refresh)
+        self.label_button = QPushButton(_("New labelled address…"))
+        self.label_button.clicked.connect(self.new_label)
         self.spend_button = QPushButton(_("Spend…"))
         self.spend_button.clicked.connect(self.open_spend)
         self.buttons = QHBoxLayout()
         self.buttons.addWidget(self.setup_button)
         self.buttons.addStretch(1)
         self.buttons.addWidget(self.refresh_button)
+        self.buttons.addWidget(self.label_button)
         self.buttons.addWidget(self.spend_button)
 
         layout = QVBoxLayout(self)
@@ -115,6 +121,7 @@ class ReceiveTab(QWidget):
         layout.addLayout(self.buttons)
 
         self._loaded.connect(self._show)
+        self._in_gui.connect(lambda function: function())
         self.timer = QTimer(self)
         self.timer.setInterval(REFRESH_MS)
         self.timer.timeout.connect(self.refresh)
@@ -152,6 +159,7 @@ class ReceiveTab(QWidget):
         )
         self.address_e.setText(settings.address if settings else "")
         self.refresh_button.setEnabled(configured)
+        self.label_button.setEnabled(configured)
         self.spend_button.setEnabled(configured)
         if settings is None:
             self._set_status(
@@ -175,6 +183,7 @@ class ReceiveTab(QWidget):
             try:
                 client = self.client(settings)
                 status = client.check_pairing(settings.address)
+                self.labels = client.labels()
                 self._loaded.emit(status, client.outputs(), None)
             except Exception as exc:
                 self._loaded.emit(None, None, exc)
@@ -219,6 +228,9 @@ class ReceiveTab(QWidget):
         self.table.clear()
         for output in display_order(self.outputs):
             label = "" if output.label is None else str(output.label)
+            comment = self.labels.get(output.label, {}).get("comment")
+            if comment:
+                label += f" ({comment})"
             block = "" if output.height is None else str(output.height)
             item = QTreeWidgetItem(
                 [status_text(output), fmt(output.amount), label, block, output.outpoint]
@@ -234,6 +246,48 @@ class ReceiveTab(QWidget):
         if dialog.exec():
             self.update_view()
             self.refresh()
+
+    def _background(self, work, done) -> None:
+        """Run work() off the GUI thread, then done(result, error) on it."""
+
+        def run():
+            try:
+                result, error = work(), None
+            except Exception as exc:
+                result, error = None, exc
+            self._in_gui.emit(lambda: done(result, error))
+
+        threading.Thread(target=run, name="spscand", daemon=True).start()
+
+    def new_label(self) -> None:
+        settings = self.settings()
+        if settings is None or not settings.url:
+            return
+        comment, ok = QInputDialog.getText(
+            self,
+            _("New labelled address"),
+            _("What is this address for? (only you and spscand see this)"),
+        )
+        if not ok:
+            return
+
+        def done(label, error):
+            if error is not None:
+                self.window.show_error(_("spscand: {}").format(error))
+                return
+            self.window.do_copy(label["address"], title=_("Labelled address"))
+            self.window.show_message(
+                _(
+                    "Labelled address {} ({}):\n\n{}\n\nIt was copied to the clipboard."
+                ).format(
+                    label["label"],
+                    label["comment"] or _("no comment"),
+                    label["address"],
+                )
+            )
+            self.refresh()
+
+        self._background(lambda: self.client(settings).add_label(comment.strip()), done)
 
     def open_spend(self) -> None:
         settings = self.settings()

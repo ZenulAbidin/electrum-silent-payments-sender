@@ -16,8 +16,9 @@ from urllib.parse import urlencode, urlsplit
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
-# fetch(url, headers, use_proxy) -> (HTTP status, body bytes)
-Fetch = Callable[[str, dict, bool], tuple]
+# fetch(url, headers, use_proxy, json_body) -> (HTTP status, body bytes); a POST
+# when json_body is not None.
+Fetch = Callable[[str, dict, bool, Optional[dict]], tuple]
 
 
 class SpscandError(Exception):
@@ -144,19 +145,26 @@ class SpscandClient:
         self.token = token.strip()
         self.fetch = fetch
 
-    def _get(self, path: str, query: Optional[dict] = None):
+    def _get(
+        self, path: str, query: Optional[dict] = None, *, post: Optional[dict] = None
+    ):
         url = self.endpoint.base + path + (f"?{urlencode(query)}" if query else "")
         headers = {"Accept": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         try:
-            status, body = self.fetch(url, headers, self.endpoint.use_proxy)
+            status, body = self.fetch(url, headers, self.endpoint.use_proxy, post)
         except SpscandError:
             raise
         except Exception as exc:
             raise SpscandError(f"Cannot reach spscand: {exc}") from None
         if status == 401:
             raise SpscandError("spscand refused the API token.")
+        if status == 403 and post is not None:
+            raise SpscandError(
+                "spscand only accepts changes with an API token: set one "
+                "(spscand pair does it) and restart spscand."
+            )
         if status != 200:
             raise SpscandError(f"spscand answered HTTP {status} for {path}.")
         try:
@@ -184,6 +192,31 @@ class SpscandClient:
                     return address
         raise SpscandError("spscand did not report its address.")
 
+    def labels(self) -> dict[int, dict]:
+        """Registered labels: number -> {"comment", "address"}."""
+        rows = self._get("/v1/addresses")
+        if not isinstance(rows, list):
+            raise SpscandError("spscand sent an invalid address list.")
+        labels = {}
+        for row in rows:
+            if isinstance(row, dict) and isinstance(row.get("label"), int):
+                labels[row["label"]] = {
+                    "comment": str(row.get("comment") or ""),
+                    "address": str(row.get("address") or ""),
+                }
+        return labels
+
+    def add_label(self, comment: str) -> dict:
+        """A new label with the next free number: {"label", "comment", "address"}."""
+        result = self._get("/v1/labels", post={"comment": comment})
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("label"), int)
+            or not isinstance(result.get("address"), str)
+        ):
+            raise SpscandError("spscand sent an invalid answer for the new label.")
+        return result
+
     def outputs(self, since_height: Optional[int] = None) -> list[ReceivedOutput]:
         query = {"since_height": since_height} if since_height is not None else None
         rows = self._get("/v1/outputs", query)
@@ -205,7 +238,7 @@ class SpscandClient:
 def electrum_fetch(network) -> Fetch:
     """A fetch function on Electrum's asyncio loop, using its proxy when asked."""
 
-    def fetch(url: str, headers: dict, use_proxy: bool):
+    def fetch(url: str, headers: dict, use_proxy: bool, json_body=None):
         import asyncio
 
         from electrum import util
@@ -213,7 +246,11 @@ def electrum_fetch(network) -> Fetch:
         async def get():
             proxy = network.proxy if (use_proxy and network is not None) else None
             async with util.make_aiohttp_session(proxy, timeout=30) as session:
-                async with session.get(url, headers=headers) as response:
+                if json_body is None:
+                    request = session.get(url, headers=headers)
+                else:
+                    request = session.post(url, headers=headers, json=json_body)
+                async with request as response:
                     return response.status, await response.read()
 
         loop = util.get_asyncio_loop()

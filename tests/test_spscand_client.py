@@ -36,10 +36,13 @@ class FakeSpscand:
     def __init__(self, token="t0ken"):
         self.token = token
         self.requests = []
+        self.bodies = []
         self.outputs = [row()]
+        self.labels = {1: "shop"}
 
-    def __call__(self, url, headers, use_proxy):
+    def __call__(self, url, headers, use_proxy, json_body=None):
         self.requests.append((url, headers, use_proxy))
+        self.bodies.append(json_body)
         if headers.get("Authorization") != f"Bearer {self.token}":
             return 401, b'{"error": "unauthorized"}'
         path = url.split("://", 1)[1].split("/", 1)[1]
@@ -54,10 +57,14 @@ class FakeSpscand:
                 "mempool": None,
             }
         elif path == "v1/addresses":
-            body = [
-                {"label": None, "address": ADDRESS},
-                {"label": 1, "comment": "", "address": "tsp1qlabel"},
+            body = [{"label": None, "address": ADDRESS}] + [
+                {"label": m, "comment": c, "address": f"tsp1qlabel{m}"}
+                for m, c in self.labels.items()
             ]
+        elif path == "v1/labels" and json_body is not None:
+            m = max(self.labels, default=0) + 1
+            self.labels[m] = json_body.get("comment", "")
+            body = {"label": m, "comment": self.labels[m], "address": f"tsp1qlabel{m}"}
         elif path.startswith("v1/outputs"):
             body = self.outputs
         else:
@@ -171,10 +178,10 @@ class TestClient(unittest.TestCase):
     def test_old_spscand(self):
         fake = FakeSpscand()
 
-        def old(url, headers, use_proxy):
+        def old(url, headers, use_proxy, json_body=None):
             if url.endswith("/v1/status"):
                 return 200, b'{"network": "regtest"}'
-            return fake(url, headers, use_proxy)
+            return fake(url, headers, use_proxy, json_body)
 
         client = SpscandClient(
             "http://127.0.0.1:7352", "t0ken", old, proxy_enabled=False
@@ -183,7 +190,7 @@ class TestClient(unittest.TestCase):
             client.status()
 
     def test_unreachable(self):
-        def down(url, headers, use_proxy):
+        def down(url, headers, use_proxy, json_body=None):
             raise OSError("connection refused")
 
         client = SpscandClient("http://127.0.0.1:7352", "", down, proxy_enabled=False)
@@ -191,6 +198,29 @@ class TestClient(unittest.TestCase):
             SpscandError, "Cannot reach spscand: connection refused"
         ):
             client.status()
+
+    def test_labels(self):
+        fake = FakeSpscand()
+        client = SpscandClient(
+            "http://127.0.0.1:7352", "t0ken", fake, proxy_enabled=False
+        )
+        self.assertEqual(
+            client.labels(), {1: {"comment": "shop", "address": "tsp1qlabel1"}}
+        )
+        added = client.add_label("donations")
+        self.assertEqual((added["label"], added["address"]), (2, "tsp1qlabel2"))
+        self.assertEqual(fake.bodies[-1], {"comment": "donations"})
+        self.assertTrue(fake.requests[-1][0].endswith("/v1/labels"))
+
+    def test_changes_without_a_token(self):
+        def no_token(url, headers, use_proxy, json_body=None):
+            return 403, b'{"error": "changes need [api] token to be set"}'
+
+        client = SpscandClient(
+            "http://127.0.0.1:7352", "", no_token, proxy_enabled=False
+        )
+        with self.assertRaisesRegex(SpscandError, "spscand pair"):
+            client.add_label("x")
 
 
 if __name__ == "__main__":
