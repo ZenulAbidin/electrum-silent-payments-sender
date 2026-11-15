@@ -47,3 +47,24 @@ Electrum 4.8 requires the `server.features` call. mempool's electrs does not imp
 Published results cover Electrum 4.8.3 and 4.8.4: the offline mainnet and testnet lifecycle and recovery files in `test-results/`, and the regtest GUI matrix in `test-results/regtest/`.
 
 Electrum 4.8.3 is the minimum supported version because it is the first release that fixes CVE-2026-117601 (GHSA-6jp4-8v48-cc5v), where a malicious server replaces a just-broadcast transaction and tries to get the user to fee-bump the fake one.
+
+### Receiving
+
+The receiving code has unit tests that run with the shim (`tests/test_spscand_client.py`, `tests/test_receive_state.py`) and two that need Electrum itself, for key derivation and signing:
+
+```bash
+PYTHONPATH=/path/to/electrum python3 -m unittest tests.test_receive_keys tests.test_receive_spend
+```
+
+They are skipped in the normal run. The key tests check BIP352's paths against a BIP32 derivation written out independently of Electrum; the spend tests check signatures and, for a payment to a silent payment address, the output from the receiver's side.
+
+`scripts/electrum_receive_harness.py` runs Electrum's real Qt window with the plugin from this tree and a real spscand watching the mempool, on regtest. It needs a regtest `bitcoind` with a funded wallet named `miner`, an Electrum server, and an spscand checkout (Python 3.11 or newer for spscand):
+
+```bash
+PYTHONPATH=/path/to/electrum python3 scripts/electrum_receive_harness.py \
+  --spscand /path/to/spscand --bitcoin-conf /path/to/regtest/bitcoin.conf \
+  --server 127.0.0.1:60401:t --workdir /path/to/scratch --output result.json
+```
+
+It pairs with spscand's pairing string, then checks that payments show while unconfirmed, that one replaced with RBF disappears, and that the rest confirm. It spends one through the Spend dialog: Bitcoin Core must accept the spend, Electrum broadcasts it, and it must show as pending, then spent, with the coins in the wallet. It hands out a labelled address and checks that a payment to it appears from spscand's events alone, with the tab's timer stopped. It pays a silent payment address from received coins, and spscand's own scanner must find that payment. Last, it asks for a rescan and checks that the same payments come back.
+

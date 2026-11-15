@@ -10,6 +10,8 @@ A sender implementation of [BIP352 Silent Payments](https://bips.dev/352/) for E
 
 It integrates directly into Electrum's existing **Send** tab. Paste a Silent Payment address into **Pay to**, enter the amount, and press **Pay…** as usual. The plugin detects the address and builds a normal Bitcoin transaction whose recipient output is derived from the wallet's selected inputs. 
 
+On the Qt desktop GUI it can also receive silent payments, with [spscand](https://github.com/ZenulAbidin/spscand) doing the scanning on your own computer or server: see [Receive](#receive).
+
 ## Safety status
 
 This is an independent plugin, not an official Electrum feature, and has not received a professional security audit. Review the source, verify the release hash, test on testnet, and use a small amount for any first mainnet payment.
@@ -50,6 +52,24 @@ In Electrum's **New Transaction** send preview, the payment output uses the comp
 Both the Silent Payment address and the derived Taproot address can be copied from the transaction details dialog.
 
 Coin control is supported through Electrum's normal Coins tab selection. If an extremely unlikely invalid scalar is encountered, select a different set of coins and retry.
+
+## Receive
+
+Receiving needs [spscand](https://github.com/ZenulAbidin/spscand) 0.1.1 or newer, running where you choose: the same computer, a home server or a VPS. spscand holds the scan key and finds payments to your silent payment address; Electrum keeps the spend key and signs. The Qt GUI shows a **Silent Payments** tab for standard software wallets (not hardware, watch-only or multisig wallets).
+
+1. In the tab, press **Set up receiving…**, choose the block to start scanning from, and enter the wallet password. A wallet restored from BIP39 seed words asks for those words once, because Electrum does not keep them; they are checked against the wallet and not stored. The keys are BIP352's, at `m/352'/0'/0'/1'/0` (scan) and `m/352'/0'/0'/0'/0` (spend), with `1'` instead of the second `0'` on test networks, so other BIP352 wallets restored from the same seed find the same payments.
+2. Settings then show an `spscand init …` command and the scan key. Run the command where spscand lives and paste the scan key when it asks. The scan key lets spscand see your payments, never spend them.
+3. Start `spscand run`, run `spscand pair` (or `spscand pair --url http://….onion:7352` for a Tor onion service), and paste the line it prints into **Pairing string** in Settings.
+
+spscand on the same computer is reached directly. A `.onion` address is reached through the Tor proxy set in Electrum's network settings, and any other address only over `https`.
+
+The tab lists every payment found, with its status, amount, label and block. Payments still in the mempool show as **Unconfirmed** and count as incoming, not in the balance; the sender can still replace them. spscand shows them only when it watches the mempool, which needs a Bitcoin Core node (see spscand's README). The tab updates as soon as spscand reports something, and every 15 seconds anyway.
+
+- **Spend…** sends selected payments to an address or to another silent payment address, with change to this wallet. Spending unconfirmed payments is off unless enabled in Settings.
+- **New labelled address…** hands out an address with a label number and a note to yourself, so you can tell payments apart.
+- **Rescan…** has spscand scan again from a block.
+
+Received payments appear in the Silent Payments tab, not in Electrum's History: Electrum gives plugins no way to add them there.
 
 ## QML GUI
 
