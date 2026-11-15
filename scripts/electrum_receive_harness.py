@@ -122,12 +122,13 @@ class Spscand:
 class Driver:
     """Steps through the scenario on the Qt event loop, one check per tick."""
 
-    def __init__(self, args, gui, plugin, chain, sender, settings, results):
+    def __init__(self, args, gui, plugin, chain, sender, settings, results, spscand):
         from PyQt6.QtCore import QTimer
 
         self.args, self.gui, self.plugin = args, gui, plugin
         self.chain, self.sender, self.settings = chain, sender, settings
         self.results = results
+        self.spscand = spscand
         self.deadline = time.monotonic() + args.timeout
         self.step = self.step_window
         self.timer = QTimer(gui.app)
@@ -215,6 +216,17 @@ class Driver:
             self.settings.spscand_init_command() in texts,
             texts,
         )
+        from silent_payments_sender.receive_keys import load_settings
+
+        dialog = ReceiveSettingsDialog(self.tab)
+        dialog.pairing_e.setText(self.spscand.cli("pair").strip())
+        dialog.accept()
+        paired = load_settings(window.wallet)
+        self.check(
+            "paired with the string from spscand pair",
+            (paired.url, paired.token) == (self.spscand.url, self.spscand.token),
+        )
+        self.tab.update_view()
         return self.step_synced
 
     def step_synced(self):
@@ -353,6 +365,149 @@ class Driver:
         self.check(
             "coins arrived in the wallet", PAY_SAT - 1000 < gained < PAY_SAT, gained
         )
+        return self.step_label
+
+    def step_label(self):
+        from silent_payments_sender import receive_qt
+
+        receive_qt.QInputDialog.getText = staticmethod(lambda *a, **k: ("shop", True))
+        self.window.show_message = lambda *a, **k: None
+        self.tab.new_label()
+        return self.step_label_added
+
+    def step_label_added(self):
+        from spscand.bip352 import label_tweak
+        from spscand.secp import Point
+
+        label = next(
+            (m for m, v in self.tab.labels.items() if v["comment"] == "shop"), None
+        )
+        if label is None:
+            self.tab.refresh()
+            return None
+        self.check("labelled address handed out", label == 1, self.tab.labels)
+        self.label = label
+        spend = Point.parse(self.settings.spend_pubkey).add_generator(
+            label_tweak(self.settings.scan_secret, label)
+        )
+        recipient = {
+            "address": self.tab.labels[label]["address"],
+            "scan_pub_key": self.results["scan_pubkey"],
+            "spend_pub_key": spend.serialize().hex(),
+        }
+        coin = self.sender.fund("p2wpkh", Decimal(1))
+        self.sender.mine()
+        # From here only the event feed can update the tab.
+        self.tab.timer.stop()
+        self.labelled = self.sender.pay([coin], [recipient])
+        self.live_since = time.monotonic()
+        return self.step_label_live
+
+    def step_label_live(self):
+        found = [o for o in self.tab.outputs if o.txid == self.labelled]
+        if not found:
+            return None
+        self.check(
+            "tab updated by spscand's events, without polling",
+            time.monotonic() - self.live_since < 20,
+        )
+        self.check(
+            "payment carries the label", [o.label for o in found] == [self.label]
+        )
+        rows = [
+            self.tab.table.topLevelItem(i).text(2)
+            for i in range(self.tab.table.topLevelItemCount())
+        ]
+        self.check("label comment shown", f"{self.label} (shop)" in rows, rows)
+        self.tab.timer.start()
+        self.sender.mine()
+        return self.step_pay_silent_payment
+
+    def step_pay_silent_payment(self):
+        from silent_payments_sender.receive_qt import SpendDialog
+        from spscand.bip352 import Receiver
+        from spscand.secp import N, Point
+
+        found = [o for o in self.outputs() if o.txid == self.labelled]
+        if not found or not found[0].confirmed:
+            return None
+        self.other = Receiver(
+            secrets.randbelow(N - 1) + 1,
+            Point.from_secret(secrets.randbelow(N - 1) + 1),
+        )
+        dialog = SpendDialog(self.tab, self.tab.settings(), found)
+        dialog.destination_e.setText(self.other.address("regtest"))
+        dialog.amount_e.setText("5000000")
+        dialog.fee_rate_e.setText("2")
+        captured = []
+        dialog.question = lambda *a, **k: True
+        self.window.broadcast_or_show = captured.append
+        dialog.accept()
+        self.check("spend to a silent payment address signed", len(captured) == 1)
+        tx = captured[0]
+        accepted = self.chain.call("testmempoolaccept", [tx.serialize()])[0]
+        self.check("Bitcoin Core accepts it", accepted["allowed"], accepted)
+        self.window.network.run_from_another_thread(
+            self.window.network.broadcast_transaction(tx)
+        )
+        self.sp_txid = tx.txid()
+        self.check(
+            "recorded with the recipient's address",
+            bool(self.window.wallet.get_label_for_txid(self.sp_txid)),
+        )
+        self.sender.mine()
+        return self.step_silent_payment_found
+
+    def step_silent_payment_found(self):
+        from spscand.backends import scan_group
+
+        try:
+            info = self.chain.call("getrawtransaction", self.sp_txid, 1)
+        except Exception:
+            return None
+        if not info.get("blockhash"):
+            return None
+        block = self.chain.call("getblock", info["blockhash"], 3)
+        tx = next(t for t in block["tx"] if t["txid"] == self.sp_txid)
+        group = scan_group(tx)
+        found = self.other.scan_group(group.tweaks, [o.key for o in group.outputs])
+        self.check(
+            "the other wallet finds it with spscand's own scanner",
+            len(found) == 1 and group.outputs[found[0][1].index].amount == 5_000_000,
+            found,
+        )
+        return self.step_rescan
+
+    def step_rescan(self):
+        from silent_payments_sender import receive_qt
+
+        outputs = self.outputs()
+        # The tab refreshes in the background: wait until it shows the spend just mined.
+        spent = [o for o in outputs if o.txid == self.labelled]
+        if not all(o.confirmed for o in outputs) or not spent or not spent[0].spent:
+            return None
+        self.before_rescan = sorted((o.txid, o.vout, o.spent) for o in outputs)
+        receive_qt.QInputDialog.getInt = staticmethod(
+            lambda *a, **k: (self.settings.birthday, True)
+        )
+        self.tab.rescan()
+        self.rescan_asked = time.monotonic()
+        return self.step_rescanned
+
+    def step_rescanned(self):
+        log = (self.args.workdir / "spscand.log").read_text()
+        if (
+            "as asked through the API" not in log
+            or time.monotonic() - self.rescan_asked < 2
+        ):
+            return None
+        outputs = self.outputs()
+        if "scanned to block" not in self.tab.status_label.text():
+            return None
+        after = sorted((o.txid, o.vout, o.spent) for o in outputs)
+        if after != self.before_rescan:
+            return None
+        self.check("rescan from the tab finds the same payments", True)
         return self.step_done
 
     def step_done(self):
@@ -428,7 +583,6 @@ def main():
         public_key,
         save_settings,
     )
-    import dataclasses
 
     wallet_path = Path(config.get_datadir_wallet_path()) / "sp-receive"
     wallet_path.parent.mkdir(parents=True, exist_ok=True)
@@ -444,8 +598,7 @@ def main():
         wallet.get_keystore(), WALLET_PASSWORD, network="regtest", birthday=birthday
     )
     spscand = Spscand(args, settings, birthday, node)
-    settings = dataclasses.replace(settings, url=spscand.url, token=spscand.token)
-    save_settings(wallet, settings)
+    save_settings(wallet, settings)  # spscand's address and token come by pairing
 
     results = {
         "checks": [],
@@ -468,7 +621,7 @@ def main():
         config.set_key("gui_last_wallet", str(wallet_path))
         config.CURRENT_WALLET = str(wallet_path)
         gui = ElectrumGui(config=config, daemon=daemon, plugins=plugins)
-        driver = Driver(args, gui, plugin, chain, sender, settings, results)
+        driver = Driver(args, gui, plugin, chain, sender, settings, results, spscand)
         assert driver
         gui.main()
     finally:
