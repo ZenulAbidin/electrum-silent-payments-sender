@@ -11,7 +11,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Callable, Optional
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -60,6 +60,26 @@ def check_url(url: str, *, proxy_enabled: bool) -> Endpoint:
             "http would expose your payments and token on the network."
         )
     return Endpoint(base, use_proxy=proxy_enabled)
+
+
+@dataclass(frozen=True)
+class Pairing:
+    url: str
+    token: str
+    network: str  # spscand's name: main, test, testnet4, signet or regtest
+    address: str
+
+
+def parse_pairing(text: str) -> Pairing:
+    """Read the line 'spscand pair' prints: spscand://pair?url=…&token=…"""
+    parts = urlsplit(text.strip())
+    if parts.scheme != "spscand" or parts.netloc != "pair":
+        raise SpscandError("A pairing string starts with spscand://pair?")
+    fields = dict(parse_qsl(parts.query))
+    missing = [k for k in ("url", "token", "network", "address") if not fields.get(k)]
+    if missing:
+        raise SpscandError(f"The pairing string lacks {', '.join(missing)}.")
+    return Pairing(fields["url"], fields["token"], fields["network"], fields["address"])
 
 
 @dataclass(frozen=True)

@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
 
 from .core import SilentPaymentError
 from .receive_keys import (
+    SPSCAND_NETWORKS,
     ReceiveSetupError,
     create_settings,
     load_settings,
@@ -45,6 +46,7 @@ from .spscand_client import (
     SpscandError,
     check_url,
     electrum_fetch,
+    parse_pairing,
     proxy_enabled,
 )
 from .txflow import silent_payment_history_label
@@ -386,8 +388,11 @@ class ReceiveSettingsDialog(WindowModalDialog):
         self.url_e.setPlaceholderText("http://127.0.0.1:7352  or  http://….onion:7352")
         self.token_e = QLineEdit(self.settings.token if self.settings else "")
         self.token_e.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow(_("spscand address"), self.url_e)
-        form.addRow(_("API token"), self.token_e)
+        self.pairing_e = QLineEdit()
+        self.pairing_e.setPlaceholderText(_("spscand://pair?… (from 'spscand pair')"))
+        form.addRow(_("Pairing string"), self.pairing_e)
+        form.addRow(_("or spscand address"), self.url_e)
+        form.addRow(_("and API token"), self.token_e)
 
         self.birthday_e = self.words_e = self.passphrase_e = None
         if self.settings is None:
@@ -460,12 +465,30 @@ class ReceiveSettingsDialog(WindowModalDialog):
                 return
         url, token = self.url_e.text().strip(), self.token_e.text().strip()
         try:
+            pairing = None
+            if self.pairing_e.text().strip():
+                pairing = parse_pairing(self.pairing_e.text())
+                if pairing.network != SPSCAND_NETWORKS.get(constants.net.NET_NAME):
+                    raise SpscandError(
+                        _("This spscand runs on {}, and this wallet does not.").format(
+                            pairing.network
+                        )
+                    )
+                url, token = pairing.url, pairing.token
             if url:
                 # Checked now, so a bad address fails here rather than on every refresh.
                 check_url(url, proxy_enabled=proxy_enabled(self.window.network))
             settings = self.settings or self._create()
             if settings is None:
                 return
+            if pairing and pairing.address != settings.address:
+                raise SpscandError(
+                    _(
+                        "This spscand scans for a different silent payment address "
+                        "than this wallet's. Set it up with this wallet's spscand init "
+                        "command first."
+                    )
+                )
         except (ReceiveSetupError, SpscandError) as exc:
             self.show_error(str(exc))
             return

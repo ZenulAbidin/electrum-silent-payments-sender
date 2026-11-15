@@ -6,6 +6,7 @@ from silent_payments_sender.spscand_client import (
     SpscandError,
     check_url,
     parse_output,
+    parse_pairing,
 )
 
 
@@ -159,6 +160,27 @@ class TestParseOutput(unittest.TestCase):
         ):
             with self.subTest(changes), self.assertRaises(SpscandError):
                 parse_output(row(**changes))
+
+
+class TestPairing(unittest.TestCase):
+    def test_parse(self):
+        pairing = parse_pairing(
+            "spscand://pair?url=http%3A%2F%2Fabc.onion%3A7352&token=t0ken"
+            "&network=regtest&address=tsp1qexample\n"
+        )
+        self.assertEqual(
+            (pairing.url, pairing.token, pairing.network, pairing.address),
+            ("http://abc.onion:7352", "t0ken", "regtest", "tsp1qexample"),
+        )
+
+    def test_rejects_others(self):
+        for text in (
+            "http://127.0.0.1:7352",
+            "spscand://other?url=x",
+            "spscand://pair?url=http%3A%2F%2Fx&network=main&address=sp1q",
+        ):
+            with self.subTest(text), self.assertRaises(SpscandError):
+                parse_pairing(text)
 
 
 class TestClient(unittest.TestCase):
