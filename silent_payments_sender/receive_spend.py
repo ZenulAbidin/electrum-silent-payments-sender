@@ -1,4 +1,4 @@
-"""Spending received silent payments.
+"""Spending received silent payments, to an ordinary or a silent payment address.
 
 Each output's key is d·G with d = (b_spend + tweak) mod n, where spscand's
 tweak already includes any label tweak. It is a plain taproot key with no
@@ -12,6 +12,13 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
+from .core import (
+    PLACEHOLDER_SCRIPT,
+    derive_output_script,
+    expected_hrp,
+    is_silent_payment_request_text,
+    parse_silent_payment_request,
+)
 from .spscand_client import ReceivedOutput
 
 CURVE_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -37,6 +44,26 @@ def output_secret(spend_secret: int, output: ReceivedOutput) -> int:
             "Nothing was signed."
         )
     return secret
+
+
+def taproot_input_key(secret: int) -> int:
+    """The key BIP352 counts for a taproot input: negated if its point has odd y."""
+    from electrum_ecc import ECPrivkey
+
+    odd = ECPrivkey(secret.to_bytes(32, "big")).get_public_key_bytes()[0] == 3
+    return CURVE_ORDER - secret if odd else secret
+
+
+def silent_payment_recipient(destination: str):
+    """The silent payment address in destination, or None for an ordinary address."""
+    from electrum import constants
+
+    if not is_silent_payment_request_text(destination):
+        return None
+    request = parse_silent_payment_request(
+        destination, expected_hrp=expected_hrp(is_testnet=constants.net.TESTNET)
+    )
+    return request.recipient
 
 
 def estimated_vsize(input_count: int, output_scripts: Sequence[bytes]) -> int:
@@ -109,7 +136,10 @@ def build_signed_spend(
     from electrum_ecc.util import bip340_tagged_hash
 
     secrets = [output_secret(spend_secret, o) for o in outputs]
-    destination_script = address_to_script(destination)
+    recipient = silent_payment_recipient(destination)
+    destination_script = (
+        PLACEHOLDER_SCRIPT if recipient else address_to_script(destination)
+    )
     change_script = address_to_script(change_address)
     send, change, _fee = plan_fee(
         outputs,
@@ -128,6 +158,16 @@ def build_signed_spend(
             scriptpubkey=bytes.fromhex("5120" + output.pubkey), value=output.amount
         )
         inputs.append(txin)
+    if recipient:
+        # BIP352 with our inputs, which are all taproot key-path spends.
+        destination_script = derive_output_script(
+            private_keys=[taproot_input_key(s).to_bytes(32, "big") for s in secrets],
+            serialized_outpoints=[
+                bytes.fromhex(o.txid)[::-1] + o.vout.to_bytes(4, "little")
+                for o in outputs
+            ],
+            recipient=recipient,
+        )
     tx_outputs = [PartialTxOutput(scriptpubkey=destination_script, value=send)]
     if change:
         tx_outputs.append(PartialTxOutput(scriptpubkey=change_script, value=change))

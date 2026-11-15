@@ -5,6 +5,15 @@ from __future__ import annotations
 import dataclasses
 import threading
 
+from electrum import constants
+from electrum.gui.qt.util import (
+    Buttons,
+    CancelButton,
+    ColorScheme,
+    OkButton,
+    WindowModalDialog,
+)
+from electrum.i18n import _
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -20,24 +29,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from electrum import constants
-from electrum.i18n import _
-from electrum.gui.qt.util import (
-    Buttons,
-    CancelButton,
-    ColorScheme,
-    OkButton,
-    WindowModalDialog,
-)
-
+from .core import SilentPaymentError
 from .receive_keys import (
     ReceiveSetupError,
     create_settings,
     load_settings,
     save_settings,
 )
-from .receive_spend import SpendError, build_signed_spend
+from .receive_spend import SpendError, build_signed_spend, silent_payment_recipient
 from .receive_state import balance, display_order, spendable, status_text
+from .records import store_silent_payment_record
 from .spscand_client import (
     SpscandClient,
     SpscandError,
@@ -45,6 +46,7 @@ from .spscand_client import (
     electrum_fetch,
     proxy_enabled,
 )
+from .txflow import silent_payment_history_label
 
 REFRESH_MS = 15_000
 
@@ -409,6 +411,9 @@ class SpendDialog(WindowModalDialog):
         self.amount_e = QLineEdit()
         self.amount_e.setPlaceholderText(_("everything selected, minus the fee"))
         self.fee_rate_e = QLineEdit(f"{self._default_fee_rate():g}")
+        self.destination_e.setToolTip(
+            _("An address, or a silent payment address (sp1…)")
+        )
         form.addRow(_("Pay to"), self.destination_e)
         form.addRow(_("Amount (sat)"), self.amount_e)
         form.addRow(_("Fee rate (sat/vB)"), self.fee_rate_e)
@@ -457,6 +462,10 @@ class SpendDialog(WindowModalDialog):
             )
             if password is None:
                 return
+        change_address = (
+            self.wallet.get_single_change_address_for_new_transaction()
+            or self.wallet.get_receiving_address()
+        )
         try:
             spend_secret = self.settings.spend_secret(
                 self.wallet.get_keystore(), password
@@ -465,28 +474,46 @@ class SpendDialog(WindowModalDialog):
                 self.selected(),
                 spend_secret=spend_secret,
                 destination=self.destination_e.text().strip(),
-                change_address=self.wallet.get_single_change_address_for_new_transaction()
-                or self.wallet.get_receiving_address(),
+                change_address=change_address,
                 amount=amount,
                 fee_rate=fee_rate,
                 locktime=self.wallet.adb.get_local_height(),
             )
-        except (ReceiveSetupError, SpendError) as exc:
+        except (ReceiveSetupError, SpendError, SilentPaymentError) as exc:
             self.show_error(str(exc))
             return
         except Exception as exc:
             self.show_error(_("Could not build the transaction: {}").format(exc))
             return
+        destination = self.destination_e.text().strip()
+        recipient = silent_payment_recipient(destination)
         fee = sum(o.amount for o in self.selected()) - sum(
             o.value for o in tx.outputs()
         )
         fmt = self.window.format_amount_and_units
         sent = tx.outputs()[0].value if len(tx.outputs()) == 1 else (amount or 0)
         if not self.question(
-            _("Send {} to {}?\nFee: {}").format(
-                fmt(sent), self.destination_e.text().strip(), fmt(fee)
-            )
+            _("Send {} to {}?\nFee: {}").format(fmt(sent), destination, fmt(fee))
         ):
             return
+        if recipient:
+            # As for payments from the Send tab: show the recipient in the history.
+            derived = next(
+                o.address for o in tx.outputs() if o.address != change_address
+            )
+            store_silent_payment_record(
+                self.wallet,
+                txid=tx.txid(),
+                recipient_address=recipient.encoded,
+                derived_address=derived,
+            )
+            self.wallet.set_label(
+                tx.txid(),
+                silent_payment_history_label(
+                    recipient_address=recipient.encoded,
+                    derived_address=derived,
+                    description="",
+                ),
+            )
         super().accept()
         self.window.broadcast_or_show(tx)

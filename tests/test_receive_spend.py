@@ -169,6 +169,54 @@ class TestReceiveSpend(unittest.TestCase):
             key = ECPubkey(b"\x02" + bytes.fromhex(spent.pubkey))
             self.assertTrue(key.schnorr_verify(signature, message))
 
+    def test_pay_a_silent_payment_address(self):
+        from silent_payments_sender.receive_keys import encode_address, public_key
+
+        scan, spend = 0x51, 0x52
+        address = encode_address(public_key(scan), public_key(spend), mainnet=False)
+        outputs = [received("1", 40_000, 21), received("2", 30_000, 25, vout=2)]
+        parities = {
+            ECPrivkey(
+                ((SPEND_SECRET + t) % CURVE_ORDER).to_bytes(32, "big")
+            ).get_public_key_bytes()[0]
+            for t in (21, 25)
+        }
+        self.assertEqual(parities, {2, 3}, "want one even and one odd input key")
+        tx = build_signed_spend(
+            outputs,
+            spend_secret=SPEND_SECRET,
+            destination=address,
+            change_address=CHANGE,
+            amount=20_000,
+            fee_rate=2,
+            locktime=220,
+        )
+        # The receiver's side of BIP352: input keys are the outputs' x-only keys
+        # with even y, whatever the parity of the keys we signed with.
+        keys = [ECPubkey(b"\x02" + bytes.fromhex(o.pubkey)) for o in outputs]
+        total = keys[0] + keys[1]
+        lowest = min(
+            bytes.fromhex(o.txid)[::-1] + o.vout.to_bytes(4, "little") for o in outputs
+        )
+        input_hash = int.from_bytes(
+            bip340_tagged_hash(
+                b"BIP0352/Inputs", lowest + total.get_public_key_bytes()
+            ),
+            "big",
+        )
+        shared = total * ((input_hash * scan) % CURVE_ORDER)
+        tweak = int.from_bytes(
+            bip340_tagged_hash(
+                b"BIP0352/SharedSecret", shared.get_public_key_bytes() + bytes(4)
+            ),
+            "big",
+        )
+        expected = ECPubkey(public_key(spend)) + ECPrivkey(tweak.to_bytes(32, "big"))
+        scripts = [o.scriptpubkey for o in tx.outputs()]
+        self.assertIn(b"\x51\x20" + expected.get_public_key_bytes()[1:], scripts)
+        paid = [o.value for o in tx.outputs() if o.scriptpubkey[:2] == b"\x51\x20"]
+        self.assertEqual(paid, [20_000])
+
     def test_tampered_output_is_refused(self):
         good = received("a", 50_000, 5)
         bad = ReceivedOutput(**{**good.__dict__, "pubkey": "11" * 32})
