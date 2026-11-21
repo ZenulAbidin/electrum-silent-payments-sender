@@ -1,11 +1,14 @@
 """Qt entry point for unified Electrum Send-tab Silent Payments support."""
 
 from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
 
 from electrum import constants
 from electrum.i18n import _
 from electrum.plugin import BasePlugin, hook
 from electrum.transaction import PartialTxOutput
+from electrum.util import NoDynamicFeeEstimates, NotEnoughFunds
+from electrum.wallet import InternalAddressCorruption
 
 from .core import (
     PLACEHOLDER_SCRIPT,
@@ -15,9 +18,11 @@ from .core import (
     parse_silent_payment_request,
 )
 from .txflow import (
+    LIGHTNING_CHANGE_NOTICE,
     annotate_silent_payment_output,
     annotate_silent_payment_output_addresses,
     confirm_transaction_compat,
+    contain_dialog_errors,
     finalize_transaction,
     get_silent_payment_coins,
     make_unsigned_silent_transaction,
@@ -238,6 +243,9 @@ class Plugin(BasePlugin):
             if password is None:
                 return
 
+        if window.config.WALLET_SEND_CHANGE_TO_LIGHTNING:
+            window.show_message(_(LIGHTNING_CHANGE_NOTICE))
+
         finalized_by_tx_id = {}
 
         def make_tx(fee_policy, *, confirmed_only=False, base_tx=None):
@@ -279,10 +287,40 @@ class Plugin(BasePlugin):
             finalized_by_tx_id[id(tx)] = finalized
             return tx
 
+        dialog_errors = []
+
+        def close_dialog():
+            for widget in QApplication.topLevelWidgets():
+                if getattr(widget, "make_tx", None) is guarded_make_tx:
+                    widget.reject()
+
+        def on_dialog_error(exc):
+            if dialog_errors:
+                return
+            dialog_errors.append(exc)
+            if isinstance(exc, SilentPaymentError):
+                self.logger.info(f"silent payment not created: {exc}")
+            else:
+                self.logger.exception("silent payment transaction construction failed")
+            # The dialog may still be in its constructor; close it once
+            # its event loop runs.
+            QTimer.singleShot(0, close_dialog)
+
+        guarded_make_tx = contain_dialog_errors(
+            make_tx,
+            electrum_handled=(
+                NotEnoughFunds,
+                NoDynamicFeeEstimates,
+                InternalAddressCorruption,
+            ),
+            stop_error=NotEnoughFunds,
+            on_error=on_dialog_error,
+        )
+
         try:
             tx, is_preview, _paid_with_swap = confirm_transaction_compat(
                 window=window,
-                make_tx=make_tx,
+                make_tx=guarded_make_tx,
                 amount_sat=amount_sat,
             )
         except Exception as exc:
@@ -292,6 +330,14 @@ class Plugin(BasePlugin):
             )
             return
 
+        if dialog_errors:
+            exc = dialog_errors[0]
+            window.show_error(
+                _("Could not create silent payment:\n{}").format(
+                    str(exc) or repr(exc)
+                )
+            )
+            return
         if tx is None:
             return
         if is_preview:

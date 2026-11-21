@@ -88,14 +88,12 @@ def make_unsigned_silent_transaction(
     outputs,
     spend_confirmed_only=None,
 ):
-    """Build with Electrum's wallet change policy and reject fee leakage."""
+    """Build with Electrum's wallet change policy and reject fee leakage.
+
+    Electrum's "send change to Lightning" setting is ignored: the change of a
+    silent payment always stays on-chain in the wallet.
+    """
     config = wallet.config
-    send_change_to_lightning = bool(config.WALLET_SEND_CHANGE_TO_LIGHTNING)
-    if send_change_to_lightning:
-        raise UnsupportedWallet(
-            "Sending change to Lightning is not supported for Silent Payments. "
-            "Disable that setting in the transaction window."
-        )
     change_addresses = wallet.get_change_addresses_for_new_transaction()
     settings = SilentTransactionSettings(
         change_addresses=tuple(change_addresses),
@@ -110,7 +108,7 @@ def make_unsigned_silent_transaction(
         output_rounding=bool(config.WALLET_COIN_CHOOSER_OUTPUT_ROUNDING),
         coin_chooser_policy=str(config.WALLET_COIN_CHOOSER_POLICY),
         fee_policy=fee_policy.get_descriptor(),
-        send_change_to_lightning=send_change_to_lightning,
+        send_change_to_lightning=False,
         submarine_payments_enabled=bool(
             getattr(config, "WALLET_ENABLE_SUBMARINE_PAYMENTS", False)
         ),
@@ -184,6 +182,36 @@ def make_unsigned_silent_transaction(
             "to the transaction fee. Nothing was signed."
         )
     return tx
+
+
+LIGHTNING_CHANGE_NOTICE = (
+    "Silent Payments cannot send change to Lightning. "
+    "The change from this payment will stay on-chain in your wallet."
+)
+
+
+def contain_dialog_errors(make_tx, *, electrum_handled, stop_error, on_error):
+    """Keep make_tx errors out of Electrum's crash reporter.
+
+    Electrum's confirmation dialog calls make_tx again from Qt signals (tab,
+    fee and setting changes) and catches only ``electrum_handled``; anything
+    else reaches the crash reporter. Other errors go to ``on_error`` and are
+    replaced by ``stop_error``, so the dialog is left without a transaction
+    and cannot send.
+    """
+    def guarded(fee_policy, *, confirmed_only=False, base_tx=None):
+        try:
+            return make_tx(
+                fee_policy,
+                confirmed_only=confirmed_only,
+                base_tx=base_tx,
+            )
+        except electrum_handled:
+            raise
+        except Exception as exc:
+            on_error(exc)
+            raise stop_error() from exc
+    return guarded
 
 
 def _display_chunks(address: str) -> list[str]:

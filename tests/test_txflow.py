@@ -22,6 +22,7 @@ from silent_payments_sender.txflow import (  # noqa: E402
     OUTPUT_DISPLAY_WIDTH,
     annotate_silent_payment_output,
     confirm_transaction_compat,
+    contain_dialog_errors,
     finalize_transaction,
     full_silent_payment_output_label,
     get_silent_payment_coins,
@@ -47,6 +48,14 @@ TXIDS = [
     "f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16",
     "a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d",
 ]
+
+
+class HandledByElectrum(Exception):
+    pass
+
+
+class StopBuild(Exception):
+    pass
 
 
 class FakeOutpoint:
@@ -401,23 +410,79 @@ class TxFlowTests(unittest.TestCase):
             tx._silent_payment_settings.merge_duplicate_outputs
         )
 
-    def test_send_change_to_lightning_is_explicitly_rejected(self):
-        wallet, _tx, fee_policy = self._change_policy_fixture(
+    def test_send_change_to_lightning_setting_keeps_change_on_chain(self):
+        wallet, tx, fee_policy = self._change_policy_fixture(
             selected_change_addresses=["bc1qchange0"],
             transaction_change_addresses=["bc1qchange0"],
             multiple_change=False,
             send_change_to_lightning=True,
         )
-        with self.assertRaisesRegex(
-            UnsupportedWallet,
-            "Sending change to Lightning",
+        result = make_unsigned_silent_transaction(
+            wallet=wallet,
+            fee_policy=fee_policy,
+            coins=["coin"],
+            outputs=["silent-output"],
+        )
+        self.assertIs(result, tx)
+        self.assertFalse(wallet.make_kwargs["send_change_to_lightning"])
+        self.assertFalse(
+            tx._silent_payment_settings.send_change_to_lightning
+        )
+
+    def test_dialog_guard_passes_arguments_and_result_through(self):
+        calls = []
+
+        def make_tx(fee_policy, *, confirmed_only=False, base_tx=None):
+            calls.append((fee_policy, confirmed_only, base_tx))
+            return "tx"
+
+        guarded = contain_dialog_errors(
+            make_tx,
+            electrum_handled=(StopBuild,),
+            stop_error=StopBuild,
+            on_error=lambda exc: self.fail(f"unexpected error {exc!r}"),
+        )
+        self.assertEqual("tx", guarded("fee", confirmed_only=True))
+        self.assertEqual([("fee", True, None)], calls)
+
+    def test_dialog_guard_reraises_errors_electrum_handles(self):
+        errors = []
+
+        def make_tx(_fee_policy, **_kwargs):
+            raise HandledByElectrum("no funds")
+
+        guarded = contain_dialog_errors(
+            make_tx,
+            electrum_handled=(HandledByElectrum,),
+            stop_error=StopBuild,
+            on_error=errors.append,
+        )
+        with self.assertRaises(HandledByElectrum):
+            guarded("fee")
+        self.assertEqual([], errors)
+
+    def test_dialog_guard_contains_plugin_and_unexpected_errors(self):
+        for error in (
+            UnsupportedWallet("Watch-only wallets cannot create silent payments."),
+            DerivationFailure("The transaction has no inputs."),
+            RuntimeError("bug"),
         ):
-            make_unsigned_silent_transaction(
-                wallet=wallet,
-                fee_policy=fee_policy,
-                coins=["coin"],
-                outputs=["silent-output"],
-            )
+            with self.subTest(error=error):
+                errors = []
+
+                def make_tx(_fee_policy, **_kwargs):
+                    raise error
+
+                guarded = contain_dialog_errors(
+                    make_tx,
+                    electrum_handled=(HandledByElectrum,),
+                    stop_error=StopBuild,
+                    on_error=errors.append,
+                )
+                with self.assertRaises(StopBuild) as raised:
+                    guarded("fee", confirmed_only=False, base_tx=None)
+                self.assertEqual([error], errors)
+                self.assertIs(error, raised.exception.__cause__)
 
     def test_electrum_46_confirmation_api(self):
         class Window46:
