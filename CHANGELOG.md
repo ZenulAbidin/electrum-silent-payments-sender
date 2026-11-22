@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1
+
+- Fix a crash report from the transaction window when "send change to Lightning" is on: change
+  from a silent payment now stays on-chain, and Electrum says so first
+- Show other errors while building a silent payment as a message instead of a crash report
+
 ## 1.2.0
 
 - Receive silent payments on the Qt desktop GUI with spscand 0.1.1 or newer, which holds the scan

@@ -18,7 +18,7 @@ This is an independent plugin, not an official Electrum feature, and has not rec
 
 ## Features
 
-Version 1.2.0 targets BIP352 1.1.2 and supports:
+Version 1.2.1 targets BIP352 1.1.2 and supports:
 
 - Electrum 4.8.3 or newer, Qt desktop GUI and QML GUI (4.8.3 fixes CVE-2026-117601, a server-side transaction-replacement attack)
 - Standard, single-signature deterministic software wallets
